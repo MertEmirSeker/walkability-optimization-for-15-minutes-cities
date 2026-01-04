@@ -5,8 +5,10 @@ __pycache__/
 
 cache
 old/out_balikesir_center
+old/cache
 # C extensions
 *.so
+data/
 data
 # Distribution / packaging
 .Python

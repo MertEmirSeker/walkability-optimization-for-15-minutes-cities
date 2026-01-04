@@ -1,0 +1,151 @@
+// Walkability Optimization Database Schema
+// Use DBML to define your database structure
+// Docs: https://dbml.dbdiagram.io/docs
+
+Table nodes {
+  node_id bigint [primary key]
+  osm_id bigint [unique]
+  node_type varchar(20) [not null, note: 'residential, candidate, amenity, network']
+  latitude decimal(10,8) [not null]
+  longitude decimal(11,8) [not null]
+  geom geometry [note: 'PostGIS POINT geometry']
+  created_at timestamp [default: `CURRENT_TIMESTAMP`]
+  updated_at timestamp [default: `CURRENT_TIMESTAMP`]
+}
+
+Table edges {
+  edge_id bigint [primary key]
+  from_node_id bigint [not null]
+  to_node_id bigint [not null]
+  length_meters decimal(10,2) [not null]
+  edge_type varchar(50) [note: 'sidewalk, crosswalk, pedestrian_path, etc.']
+  osm_way_id bigint
+  created_at timestamp [default: `CURRENT_TIMESTAMP`]
+}
+
+Table residential_locations {
+  residential_id bigint [primary key]
+  node_id bigint [not null, unique]
+  address text
+  building_type varchar(50)
+  original_latitude decimal(10,7) [note: 'Original building coordinates']
+  original_longitude decimal(11,7) [note: 'Original building coordinates']
+  original_osm_id bigint
+  created_at timestamp [default: `CURRENT_TIMESTAMP`]
+}
+
+Table candidate_locations {
+  candidate_id bigint [primary key]
+  node_id bigint [not null, unique]
+  capacity integer [not null, default: 1, note: 'Maximum amenities that can be allocated']
+  location_type varchar(50) [note: 'parking_lot, empty_lot, etc.']
+  area_sqm decimal(10,2)
+  created_at timestamp [default: `CURRENT_TIMESTAMP`]
+}
+
+Table amenity_types {
+  amenity_type_id integer [primary key]
+  type_name varchar(50) [not null, unique, note: 'grocery, restaurant, school']
+  type_category varchar(20) [not null, note: 'plain or depth (Aplain or Adepth)']
+  weight decimal(5,3) [not null, note: 'wa: weight for this amenity type']
+  depth_count integer [default: 1, note: 'For Adepth: number of choices (e.g., r=10 for restaurants)']
+  created_at timestamp [default: `CURRENT_TIMESTAMP`]
+}
+
+Table depth_weights {
+  depth_weight_id integer [primary key]
+  amenity_type_id integer [not null]
+  choice_rank integer [not null, note: 'p-th nearest choice (1, 2, ..., r)']
+  weight decimal(5,3) [not null, note: 'wap: weight for p-th choice']
+}
+
+Table existing_amenities {
+  amenity_id bigint [primary key]
+  node_id bigint [not null]
+  amenity_type_id integer [not null]
+  name text
+  osm_id bigint
+  created_at timestamp [default: `CURRENT_TIMESTAMP`]
+}
+
+Table shortest_paths {
+  path_id bigint [primary key]
+  from_node_id bigint [not null]
+  to_node_id bigint [not null]
+  distance_meters decimal(10,2) [not null]
+  path_length integer [note: 'Number of edges in path']
+  computed_at timestamp [default: `CURRENT_TIMESTAMP`]
+}
+
+Table walkability_scores {
+  score_id bigint [primary key]
+  residential_id bigint [not null]
+  scenario varchar(50) [not null, note: 'baseline, optimized_milp, optimized_greedy, etc.']
+  weighted_distance decimal(10,2) [not null, note: 'li: weighted walking distance']
+  walkscore decimal(5,2) [not null, note: 'fi: WalkScore (0-100)']
+  computed_at timestamp [default: `CURRENT_TIMESTAMP`]
+}
+
+Table optimization_results {
+  result_id bigint [primary key]
+  scenario varchar(50) [not null, note: 'milp_k3, greedy_k3, etc.']
+  amenity_type_id integer [not null]
+  candidate_id bigint [not null]
+  allocation_count integer [not null, default: 1, note: 'yja: number of amenities allocated']
+  objective_value decimal(10,4) [note: 'Average WalkScore achieved']
+  solver varchar(20) [note: 'milp, greedy, cp']
+  solve_time_seconds decimal(10,2)
+  created_at timestamp [default: `CURRENT_TIMESTAMP`]
+}
+
+Table distance_assignments {
+  assignment_id bigint [primary key]
+  residential_id bigint [not null]
+  amenity_type_id integer [not null]
+  amenity_node_id bigint [not null, note: 'Can be existing or allocated']
+  distance_meters decimal(10,2) [not null]
+  scenario varchar(50) [not null]
+  created_at timestamp [default: `CURRENT_TIMESTAMP`]
+}
+
+Table depth_assignments {
+  depth_assignment_id bigint [primary key]
+  residential_id bigint [not null]
+  amenity_type_id integer [not null]
+  choice_rank integer [not null, note: 'p-th nearest choice']
+  amenity_node_id bigint [not null]
+  distance_meters decimal(10,2) [not null]
+  scenario varchar(50) [not null]
+  created_at timestamp [default: `CURRENT_TIMESTAMP`]
+}
+
+// Foreign Key Relationships
+
+Ref: edges.from_node_id > nodes.node_id [delete: cascade]
+Ref: edges.to_node_id > nodes.node_id [delete: cascade]
+
+Ref: residential_locations.node_id > nodes.node_id [delete: cascade]
+
+Ref: candidate_locations.node_id > nodes.node_id [delete: cascade]
+
+Ref: depth_weights.amenity_type_id > amenity_types.amenity_type_id [delete: cascade]
+
+Ref: existing_amenities.node_id > nodes.node_id [delete: cascade]
+Ref: existing_amenities.amenity_type_id > amenity_types.amenity_type_id
+
+Ref: shortest_paths.from_node_id > nodes.node_id [delete: cascade]
+Ref: shortest_paths.to_node_id > nodes.node_id [delete: cascade]
+
+Ref: walkability_scores.residential_id > nodes.node_id [delete: cascade]
+
+Ref: optimization_results.amenity_type_id > amenity_types.amenity_type_id
+Ref: optimization_results.candidate_id > candidate_locations.candidate_id
+
+Ref: distance_assignments.residential_id > nodes.node_id [delete: cascade]
+Ref: distance_assignments.amenity_type_id > amenity_types.amenity_type_id
+Ref: distance_assignments.amenity_node_id > nodes.node_id
+
+Ref: depth_assignments.residential_id > residential_locations.residential_id [delete: cascade]
+Ref: depth_assignments.amenity_type_id > amenity_types.amenity_type_id
+Ref: depth_assignments.amenity_node_id > nodes.node_id
+

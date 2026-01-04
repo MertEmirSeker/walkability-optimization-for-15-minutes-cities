@@ -1,0 +1,28 @@
+# Core dependencies
+networkx>=3.0
+osmnx>=1.6.0
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Database
+psycopg2-binary>=2.9.0
+sqlalchemy>=2.0.0
+
+# Optimization
+gurobipy>=10.0.0
+# Alternative: pulp>=2.7.0  # Uncomment if not using Gurobi
+
+# Visualization
+folium>=0.14.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Utilities
+pyyaml>=6.0
+geopy>=2.3.0
+shapely>=2.0.0
+geopandas>=0.13.0
+
+# Development
+python-dotenv>=1.0.0
+

@@ -1,0 +1,154 @@
+# Walkability Optimization Configuration
+# Balıkesir Şehir Merkezi
+
+# Database Configuration
+database:
+  host: localhost
+  port: 5432
+  database: walkability_center_db
+  user: seker
+  password: ""  # Local dev: peer/ident auth, no password
+  
+# Balıkesir City Center Boundary
+# Approximate coordinates for Balıkesir city center
+# You may need to adjust these based on actual city boundaries
+balikesir:
+  name: "Balıkesir City Center"
+  boundary:
+    # Karesi + Altıeylül kentsel alanını kabaca kapsayan sınırlar
+    north: 39.6700  # Latitude
+    south: 39.6300
+    east: 27.9100   # Longitude
+    west: 27.8600
+  center:
+    latitude: 39.6400
+    longitude: 27.8750
+
+# WalkScore Parameters (from paper)
+walkscore:
+  # Breakpoints for Piecewise Linear Function (meters)
+  # Balıkesir merkez için daha keskin bir PWL: 0–400m çok iyi, 400–1600m kademeli düşüş,
+  # 2400m civarı orta-kötü, 4km+ çok düşük, 8km+ sıfır.
+  breakpoints: [0, 400, 800, 1600, 2400, 4000, 8000]
+  # Scores at breakpoints (0-100 scale)
+  # 0–400m:100, 400–800m:100→90, 800–1600m:90→70, 1600–2400m:70→40,
+  # 2400–4000m:40→10, 4000–8000m:10→0
+  scores: [100, 100, 90, 70, 40, 10, 0]
+  # Walking speed (m/s) - from Toronto paper: 1.2 m/s
+  walking_speed: 1.2
+  # 15 minutes in meters: 15 * 60 * 1.2 = 1080 meters
+  fifteen_minutes_meters: 1080
+
+# Amenity Weights (from WalkScore methodology)
+amenities:
+  grocery:
+    weight: 1.0
+    category: plain  # Single nearest choice
+  school:
+    weight: 0.8
+    category: plain
+  restaurant:
+    weight: 0.6
+    category: depth  # Multiple choices
+    depth_count: 10  # Top 10 nearest restaurants
+
+# Depth Weights for restaurants (example distribution)
+depth_weights:
+  restaurant:
+    - rank: 1
+      weight: 0.4
+    - rank: 2
+      weight: 0.2
+    - rank: 3
+      weight: 0.15
+    - rank: 4
+      weight: 0.1
+    - rank: 5
+      weight: 0.05
+    - rank: 6
+      weight: 0.03
+    - rank: 7
+      weight: 0.03
+    - rank: 8
+      weight: 0.02
+    - rank: 9
+      weight: 0.01
+    - rank: 10
+      weight: 0.01
+
+# Optimization Parameters
+optimization:
+  # Maximum number of amenities to allocate per type
+  max_amenities_per_type: 9  # k ∈ {1, 2, ..., 9} as in paper
+  # Default k for testing
+  default_k: 1               # hızlı test için k=1
+  greedy_sample_size: 1      # objective için 1 konut örnekle
+  greedy_max_candidates: 10  # sadece 10 candidate üzerinde arama yap
+  # Solver settings
+  milp:
+    time_limit_seconds: 18000  # 5 hours as in paper
+    threads: 8
+    mip_gap: 0.01  # 1% optimality gap
+  greedy:
+    # No specific parameters needed
+
+# Success Criteria (from presentation)
+success_criteria:
+  # At least 70% of residential areas can reach all amenities within 15 minutes
+  residential_coverage_percentage: 70
+  # WalkScore must increase by at least 25 points
+  min_walkscore_increase: 25
+  # Average walking distance must decrease by at least 30%
+  min_distance_reduction_percentage: 30
+
+# OSM Data Collection
+osm:
+  # Tags for pedestrian network
+  pedestrian_tags:
+    - highway: footway
+    - highway: path
+    - highway: pedestrian
+    - highway: steps
+    - foot: yes
+  # Tags for residential buildings
+  residential_tags:
+    - building: residential
+    - building: house
+    - building: apartments
+    - landuse: residential
+  # Tags for amenities
+  amenity_tags:
+    grocery:
+      - shop: supermarket
+      - shop: convenience
+      - shop: grocery
+    restaurant:
+      - amenity: restaurant
+      - amenity: fast_food
+      - amenity: cafe
+    school:
+      - amenity: school
+      - amenity: kindergarten
+  # Tags for candidate locations (parking lots, empty lots)
+  candidate_tags:
+    - amenity: parking
+    - landuse: commercial
+    - landuse: retail
+
+# Visualization
+visualization:
+  map_center:
+    latitude: 39.6400
+    longitude: 27.8750
+  zoom_level: 14
+  tile_layer: "OpenStreetMap"
+  # Colors
+  colors:
+    residential: "#3498db"  # Blue
+    existing_amenity: "#2ecc71"  # Green
+    allocated_amenity: "#e74c3c"  # Red
+    candidate_location: "#f39c12"  # Orange
+    walkscore_high: "#2ecc71"
+    walkscore_medium: "#f39c12"
+    walkscore_low: "#e74c3c"
+

@@ -10,6 +10,13 @@ old/cache
 *.so
 data/
 data
+
+# Large data files
+*.osm.pbf
+*.pbf
+*.geojson
+results/
+visualizations/
 # Distribution / packaging
 .Python
 build/

@@ -7,7 +7,7 @@ cache
 old/out_balikesir_center
 # C extensions
 *.so
-
+data
 # Distribution / packaging
 .Python
 build/

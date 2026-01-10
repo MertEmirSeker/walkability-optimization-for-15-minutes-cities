@@ -127,13 +127,16 @@ class ShortestPathCalculator:
     
     def load_from_database(self):
         """Load pre-computed distances from database."""
-        print("Loading distances from database (not recommended for full city)...")
-        # Kept for backwards compatibility but unused in full-city runs.
+        print("Loading distances from database...")
         with self.db.get_session() as session:
+            # First check total count
+            count_query = "SELECT COUNT(*) FROM shortest_paths"
+            total = session.execute(text(count_query)).scalar()
+            print(f"  Found {total:,} distance pairs in database")
+            
             query = """
                 SELECT from_node_id, to_node_id, distance_meters
                 FROM shortest_paths
-                LIMIT 100000
             """
             result = session.execute(text(query))
             
@@ -143,8 +146,11 @@ class ShortestPathCalculator:
                 from_id, to_id, distance = row
                 self.distance_matrix[(from_id, to_id)] = float(distance)
                 count += 1
+                
+                if count % 50000 == 0:
+                    print(f"  Loaded {count:,} pairs...", end='\r')
             
-            print(f"Loaded {count} distance pairs from database (sample)")
+            print(f"\n  ✓ Loaded {count:,} distance pairs from database")
 
     def load_batch_for_residential(self, residential_ids: List[int]):
         """

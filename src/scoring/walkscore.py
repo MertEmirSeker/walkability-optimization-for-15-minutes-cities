@@ -96,9 +96,15 @@ class WalkScoreCalculator:
         """
         Compute weighted walking distance (li) for a residential location.
         
-        Formula from paper:
+        Formula from paper (CORRECTED - NO NORMALIZATION):
         li = Σ(wa * Di,a) for a ∈ Aplain
-           + Σ(Σ(wap * Di,a^p)) for a ∈ Adepth
+           + Σ(wa * Σ(wap * Di,a^p)) for a ∈ Adepth
+        
+        where:
+        - wa: category weight (e.g., grocery=1.0, school=0.8, restaurant=0.6)
+        - Di,a: distance from i to nearest amenity of type a (for Aplain)
+        - wap: depth weight for p-th choice (for Adepth, e.g., rank 1=0.4, rank 2=0.2)
+        - Di,a^p: distance from i to p-th nearest amenity of type a
         
         Args:
             residential_id: Residential location node ID
@@ -106,16 +112,16 @@ class WalkScoreCalculator:
                               (for optimization scenarios)
         
         Returns:
-            Weighted distance li
+            Weighted distance li (in meters, NOT normalized!)
         """
         if allocated_amenities is None:
             allocated_amenities = {}
         
         weighted_distance = 0.0
-        total_weight = 0.0
         
-        # Process plain amenities (single nearest choice)
-        for amenity_type, weight in self.plain_weights.items():
+        # Process PLAIN amenities (Aplain): single nearest choice
+        # Contribution: wa * Di,a (where Di,a = distance to nearest)
+        for amenity_type, category_weight in self.plain_weights.items():
             # Get all possible locations (existing + allocated)
             all_locations = self.graph.get_all_amenity_locations(amenity_type)
             
@@ -130,11 +136,26 @@ class WalkScoreCalculator:
                     distance = self.path_calculator.get_distance(residential_id, loc_id)
                     min_distance = min(min_distance, distance)
                 
-                weighted_distance += weight * min_distance
-                total_weight += weight
+                # Add: wa * Di,a
+                weighted_distance += category_weight * min_distance
+            else:
+                # No amenities available, use D_infinity
+                weighted_distance += category_weight * self.path_calculator.D_infinity
         
-        # Process depth amenities (multiple choices)
+        # Process DEPTH amenities (Adepth): multiple choices with depth weights
+        # Contribution: wa * Σ(wap * Di,a^p) for p=1..r
         for amenity_type, depth_weights_dict in self.depth_weights.items():
+            # Get category weight for this amenity type
+            # For depth amenities, we need to look up the category weight from database
+            with self.db.get_session() as session:
+                query = """
+                    SELECT weight FROM amenity_types WHERE type_name = :type_name
+                """
+                result = session.execute(text(query), {'type_name': amenity_type})
+                category_weight = result.scalar()
+                if category_weight is None:
+                    category_weight = 0.6  # default for restaurant
+            
             # Get all possible locations
             all_locations = self.graph.get_all_amenity_locations(amenity_type)
             
@@ -147,29 +168,34 @@ class WalkScoreCalculator:
                 distances = []
                 for loc_id in all_locations:
                     distance = self.path_calculator.get_distance(residential_id, loc_id)
-                    distances.append((loc_id, distance))
+                    distances.append(distance)
                 
-                # Sort by distance and take top r choices
-                distances.sort(key=lambda x: x[1])
-                r = len(depth_weights_dict)
+                # Sort by distance to get p-th nearest
+                distances.sort()
+                r = len(depth_weights_dict)  # number of choices (e.g., 10 for restaurant)
                 
-                # Calculate weighted sum
-                for rank in range(1, min(r + 1, len(distances) + 1)):
+                # Calculate: Σ(wap * Di,a^p) for p=1..r
+                depth_contribution = 0.0
+                for rank in range(1, r + 1):
                     if rank in depth_weights_dict:
-                        w = depth_weights_dict[rank]
-                        distance = distances[rank - 1][1]
-                        weighted_distance += w * distance
-                        total_weight += w
+                        wap = depth_weights_dict[rank]  # depth weight for rank p
+                        
+                        if rank <= len(distances):
+                            # p-th nearest exists
+                            distance_p = distances[rank - 1]
+                        else:
+                            # p-th nearest doesn't exist, use D_infinity
+                            distance_p = self.path_calculator.D_infinity
+                        
+                        depth_contribution += wap * distance_p
                 
-                # For unavailable choices, use D_infinity
-                for rank in range(len(distances) + 1, r + 1):
-                    if rank in depth_weights_dict:
-                        w = depth_weights_dict[rank]
-                        weighted_distance += w * self.path_calculator.D_infinity
-                        total_weight += w
-        
-        if total_weight > 0:
-            weighted_distance /= total_weight
+                # Add: wa * Σ(wap * Di,a^p)
+                weighted_distance += category_weight * depth_contribution
+            else:
+                # No amenities available
+                # Use D_infinity for all ranks
+                depth_contribution = sum(depth_weights_dict.values()) * self.path_calculator.D_infinity
+                weighted_distance += category_weight * depth_contribution
         
         return weighted_distance
     

@@ -53,7 +53,7 @@ class MapVisualizer:
         """
         print("Adding residential locations to map...")
         
-        # Load residential locations with original coordinates from DB
+        # Load residential locations from DB (use original coordinates for display)
         with self.db.get_session() as session:
             query = """
                 SELECT rl.residential_id,
@@ -143,7 +143,7 @@ class MapVisualizer:
             pass
     
     def add_existing_amenities(self, m: folium.Map):
-        """Add existing amenities to map."""
+        """Add existing amenities to map (using original coordinates)."""
         print("Adding existing amenities to map...")
         
         amenity_colors = {
@@ -152,16 +152,31 @@ class MapVisualizer:
             'school': '#9b59b6'
         }
         
-        for amenity_type, node_ids in self.graph.L.items():
-            color = amenity_colors.get(amenity_type, self.colors['existing_amenity'])
+        with self.db.get_session() as session:
+            # Get amenities with original coordinates
+            query = """
+                SELECT at.type_name, ea.node_id,
+                       COALESCE(ea.original_latitude, n.latitude) AS lat,
+                       COALESCE(ea.original_longitude, n.longitude) AS lon,
+                       ea.name
+                FROM existing_amenities ea
+                JOIN amenity_types at ON at.amenity_type_id = ea.amenity_type_id
+                JOIN nodes n ON n.node_id = ea.node_id
+            """
+            result = session.execute(text(query))
             
-            for node_id in node_ids:
-                lat, lon = self.graph.get_node_coordinates(node_id)
+            for row in result:
+                amenity_type, node_id, lat, lon, name = row
                 if lat and lon:
+                    color = amenity_colors.get(amenity_type, self.colors['existing_amenity'])
+                    popup_text = f"Existing {amenity_type}"
+                    if name:
+                        popup_text += f": {name}"
+                    
                     folium.CircleMarker(
-                        location=[lat, lon],
+                        location=[float(lat), float(lon)],
                         radius=5,
-                        popup=f"Existing {amenity_type}",
+                        popup=popup_text,
                         color=color,
                         fill=True,
                         fillColor=color,
@@ -173,7 +188,7 @@ class MapVisualizer:
     def add_allocated_amenities(self, m: folium.Map, 
                                 solution: Dict[str, Set[int]],
                                 scenario: str = "optimized"):
-        """Add allocated amenities from optimization solution."""
+        """Add allocated amenities from optimization solution (using original coordinates)."""
         print(f"Adding allocated amenities ({scenario}) to map...")
         
         amenity_colors = {
@@ -182,17 +197,30 @@ class MapVisualizer:
             'school': '#c0392b'
         }
         
-        for amenity_type, node_ids in solution.items():
-            color = amenity_colors.get(amenity_type, self.colors['allocated_amenity'])
-            
-            for node_id in node_ids:
-                lat, lon = self.graph.get_node_coordinates(node_id)
-                if lat and lon:
-                    folium.Marker(
-                        location=[lat, lon],
-                        popup=f"Allocated {amenity_type} ({scenario})",
-                        icon=folium.Icon(color='red', icon='star', prefix='fa')
-                    ).add_to(m)
+        with self.db.get_session() as session:
+            for amenity_type, node_ids in solution.items():
+                color = amenity_colors.get(amenity_type, self.colors['allocated_amenity'])
+                
+                for node_id in node_ids:
+                    # Get original coordinates from candidate_locations
+                    query = """
+                        SELECT COALESCE(cl.original_latitude, n.latitude) AS lat,
+                               COALESCE(cl.original_longitude, n.longitude) AS lon
+                        FROM candidate_locations cl
+                        JOIN nodes n ON n.node_id = cl.node_id
+                        WHERE cl.node_id = :node_id
+                    """
+                    result = session.execute(text(query), {'node_id': node_id})
+                    row = result.first()
+                    
+                    if row:
+                        lat, lon = row
+                        if lat and lon:
+                            folium.Marker(
+                                location=[float(lat), float(lon)],
+                                popup=f"Allocated {amenity_type} ({scenario})",
+                                icon=folium.Icon(color='red', icon='star', prefix='fa')
+                            ).add_to(m)
         
         print("Added allocated amenities")
     
@@ -227,7 +255,7 @@ class MapVisualizer:
         """
         print(f"Adding WalkScore heatmap ({scenario})...")
         
-        # Load WalkScores from database with original coordinates
+        # Load WalkScores from database (use original coordinates for display)
         with self.db.get_session() as session:
             query = """
                 SELECT ws.residential_id, ws.walkscore,

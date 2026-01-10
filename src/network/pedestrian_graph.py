@@ -127,10 +127,14 @@ class PedestrianGraph:
         return (None, None)
     
     def get_all_amenity_locations(self, amenity_type: str) -> Set[int]:
-        """Get all locations for an amenity type (existing + candidates)."""
+        """
+        Get all EXISTING locations for an amenity type.
+        
+        NOTE: This should ONLY return existing amenities, NOT candidates!
+        Candidates are added separately in compute_weighted_distance via allocated_amenities parameter.
+        """
         existing = self.L.get(amenity_type, set())
-        # Candidates can host any amenity type
-        return existing | self.M
+        return existing.copy()  # Return only existing amenities
     
     def validate_connectivity(self) -> Dict[str, bool]:
         """Validate graph connectivity and node sets."""

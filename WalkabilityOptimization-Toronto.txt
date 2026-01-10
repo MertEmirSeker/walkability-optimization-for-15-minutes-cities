@@ -1,0 +1,1548 @@
+The Thirty-Seventh AAAI Conference on Artificial Intelligence (AAAI-23)
+
+Walkability Optimization: Formulations, Algorithms, and a Case Study of Toronto
+Weimin Huang, Elias B. Khalil
+Department of Mechanical & Industrial Engineering, University of Toronto
+Scale AI Research Chair in Data-Driven Algorithms for Modern Supply Chains
+cheryl.huang@mail.utoronto.ca, khalil@mie.utoronto.ca
+
+Abstract
+
+2005; Fischel 2003) – residents have to travel outside their
+local communities in order to meet their daily needs. Moreover, historic disinvestment in segregated neighbourhoods
+including low-income groups and racial minorities has led
+to spatial inequality in walkability. Evidence shows that disadvantaged groups live in neighbourhoods with less accessible physical infrastructure and services (Massey 1990). With
+the COVID-19 pandemic reshaping the relationship between
+cities and the quality of life, addressing inequities and improving access to services and amenities such as healthcare
+and green spaces for vulnerable groups has also accelerated
+the need for walkable development (Mouratidis 2021).
+Improving walkability is also a powerful way to reduce
+greenhouse gas emissions (GHG) and tackle climate change.
+Dense and walkable neighbourhoods encourage active transport (walking, cycling), thus reducing automobile dependence (McIntosh et al. 2014; Brand et al. 2021). Research
+shows that technological measures (e.g., increasing the use
+of electric vehicles) alone will not be sufficient in reducing
+GHG, whereas a shift to a more sustainable mode of transportation can result in a quicker and more significant reduction of emissions from vehicles, particularly in urban areas
+(Creutzig et al. 2018; Neves and Brand 2019). Shifting from
+motorized transport to active transport is considered one of
+the most promising ways to reduce GHG. A study shows
+that active walking as a lifestyle change of residents can significantly reduce emissions related to private vehicles, even
+in European cities that are already highly walkable (Brand
+et al. 2021). Building inclusive, safe, resilient, and sustainable cities has been highlighted in the Sustainable Development Goal 11 of the United Nations.
+Towards this goal, researchers have been interested in improving walkability in cities by converting certain underused
+spaces into easily accessible amenities. For instance, some
+urban planning research relies on simulation and inspection,
+such as converting high-density regions into amenities and
+straightening busy routes (Yang, Samaranayake, and Dogan
+2020). On the other hand, one common optimization-based
+approach is to use a Genetic Algorithm (GA) that encodes
+the potential allocation locations (e.g., empty lots where a
+grocery store can be built) as fixed-sized vectors and iteratively generate child solutions from a population of candidate solutions (Cichocka 2015; Rakha and Reinhart 2012;
+Sonta and Jain 2019; Nagy, Villaggi, and Benjamin 2018;
+
+The concept of walkable urban development has gained increased attention due to its public health, economic, and environmental sustainability benefits. Unfortunately, land zoning and historic under-investment have resulted in spatial inequality in walkability and social inequality among residents.
+We tackle the problem of Walkability Optimization through
+the lens of combinatorial optimization. The task is to select
+locations in which additional amenities (e.g., grocery stores,
+schools, restaurants) can be allocated to improve resident access via walking while taking into account existing amenities and providing multiple options (e.g., for restaurants).
+To this end, we derive Mixed-Integer Linear Programming
+(MILP) and Constraint Programming (CP) models. Moreover, we show that the problem’s objective function is submodular in special cases, which motivates an efficient greedy
+heuristic. We conduct a case study on 31 underserved neighborhoods in the City of Toronto, Canada. MILP finds the
+best solutions in most scenarios but does not scale well with
+network size. The greedy algorithm scales well and finds
+high-quality solutions. Our empirical evaluation shows that
+neighbourhoods with low walkability have a great potential
+for transformation into pedestrian-friendly neighbourhoods
+by strategically placing new amenities. Allocating 3 additional grocery stores, schools, and restaurants can improve the
+“WalkScore” by more than 50 points (on a scale of 100) for 4
+neighbourhoods and reduce the walking distances to amenities for 75% of all residential locations to 10 minutes for all
+amenity types. Our code and paper appendix are available at
+https://github.com/khalil-research/walkability.
+
+1
+
+Introduction
+
+The concept of walkability in urban planning has gained increased attention as research has shown that good walkability contributes to physical health, economic development,
+and environmental sustainability (Zapata-Diomedi et al.
+2019). Highly walkable neighbourhoods allow for residents
+to easily access amenities such as retail and food in the vicinity, giving rise to the concept of the “15-minute city” (Whittle 2020). However, the zoning regulations introduced in
+the early 20th century that separate industrial, commercial,
+and residential areas have prevented walkable development
+and contributed to automobile-reliant communities (Levine
+Copyright © 2023, Association for the Advancement of Artificial
+Intelligence (www.aaai.org). All rights reserved.
+
+14249
+
+100
+95
+
+WalkScore
+
+Indraprastha 2019). However, genetic algorithms lack convergence guarantees and tend to lead to suboptimal solutions
+(Kim, Kim, and Oh 1997). Moreover, GAs do not handle
+constraints directly (Yang 2020), making them less applicable in the context of modern city planning, given the existing
+city layout and property ownership. Despite this interest in
+walkability optimization, there have not been robust and efficient methods for this problem.
+Contributions: To our knowledge, the problem of Walkability Optimization has not yet been examined from an algorithmic perspective, particularly one that considers the problem’s realistic aspects. In this paper, we contribute to this
+question along multiple axes:
+
+10
+0
+
+400
+
+1800 2400
+Distance (m)
+
+Figure 1: Distance (meters) v.s. WalkScore.
+
+1. We formulate Walkability Optimization as the combinatorial optimization problem of selecting the locations of
+new amenities to maximally improve residents’ access to
+basic necessities (Section 2). Our formulation extends the
+standard facility location problem and models residents’
+behaviour realistically – we consider multiple facility
+types, multiple potential choices for the same type, and
+an objective function with respect to the travel distances
+that represent the proximity to residents. Also, compared
+to existing work on Walkability Optimization, our formulation takes into account existing amenities rather than
+designing a layout from scratch and is flexible in capturing additional constraints on allocation.
+2. We analyze the complexity of the problem, showing that
+(a) its decision version is NP-Complete in general and
+that (b) the objective function is submodular in special
+cases (Section 3). The latter property motivates an efficient greedy algorithm presented in Section 4.
+3. We derive Mixed-Integer Linear Programming (MILP)
+and Constraint Programming (CP) models (Section 4).
+4. We perform a case study of 31 underserved neighbourhoods identified by the City of Toronto, Canada (Section 5). In most neighborhoods, significant reductions
+in walking distances can be obtained by optimizing the
+placement of several new amenities. MILP outperforms
+CP and the simple greedy algorithm achieves a good
+tradeoff between running time and solution quality.
+
+2
+
+0
+
+walkability by introducing amenities instead of other potential approaches such as improving network connectivity by
+adding edges. The latter is a challenging intervention since
+road networks are resistant to change compared to the speed
+of city expansion (Rakha and Reinhart 2012).
+
+Building Blocks
+Walkability Score To quantify walkability, we adopt the
+WalkScore methodology (Walk Score 2011), used in prior
+quantitative analyses (Duncan et al. 2011; Verbas et al.
+2015), that assigns a score fi for each residential location i based on the weighted walking distances, denoted
+as li , from i to different amenity types. The WalkScore assigns a near full score (100) for distances within 400m with
+scores decreasing with respect to li after 400m. Distances
+above 2400m (about a 30-minute walk) are not rewarded
+any points. The WalkScore fi is originally a smooth function that models this nonlinear decay with respect to li ; see
+Fig. 2 (left) in (Reyer et al. 2014). For computational purposes, nonlinear functions can be approximated with Piecewise Linear functions (PWLs) (Ngueveu 2019): fi is represented as a PWL that is parameterized by breakpoints t̄ (Fig.
+1). The parameters t̄ are shown in Appendix E.
+Weighted Walking Distances The weighted walking distance li is a linear combination of distances to multiple
+amenity types a ∈ A. Each type is given a weight wa based
+on its level of necessity, e.g., grocery stores are given the
+highest weight as they are the most frequent walking destination (Lee and Moudon 2006). For most amenity types, we
+assume that residents at location i will walk for Di,a meters
+to the nearest instance of the amenity a; we denote amenities of this type with Aplain . For amenity types for which
+variety and options are important (e.g., restaurants, coffee
+shops), we account for the resident’s “depth of choice” by
+considering a weighted combination of the distances to the
+top-r nearest instances (e.g., r = 10 for restaurants): the pth
+p
+nearest instance (e.g., of a restaurant) has distance Di,a
+and
+p
+depth
+. We have
+weight wa . We denote such amenities with A
+Aplain ∪ Adepth = A. Finally, li is expressed as
+X
+X X
+p
+, ∀i ∈ N, (1)
+li =
+wa Di,a +
+wap Di,a
+
+Problem Formulation
+
+At a high level, the Walkability Optimization problem
+(WALKO PT) is defined as follows. Given a set N of residential locations, a set M of candidate allocation locations,
+and a set L of existing amenities, we seek a set of locations
+where new amenities of different types A are allocated so
+that the average “Walkability Score” fi for residential locations i ∈ N is maximized. fi is a function of walking
+distances and can be interpreted as the proximity of A to
+residents. The maximum number of instances to be allocated for each amenity type a ∈ A is denoted as ka . The
+set of locations M , N , and L correspond to nodes on a network where edges represent the walkable paths in the neighbourhoods. The walking distances between these locations
+are the shortest-path distances, which we denote as dij for
+i ∈ N ,j ∈ M ∪ L. Note that our formulation improves
+
+a∈Aplain
+
+14250
+
+a∈Adepth p∈Pa
+
+where Pa is the set of top-r nearest instances of amenity
+type a ∈ Adepth . Note that not all r options in Pa may be
+available in the network, as the sum of the number of existing and allocated instances may be smaller than r. For
+example, there may be 2 existing restaurants and a budget
+of 3 additional restaurants to be allocated, but the number of
+choices being considered is 10 > 3 + 2. The set of available choices of type a is denoted as PaY , where |PaY | =
+min(ka + |La |, |Pa |). The set of choices that we consider
+but are not available is denoted as PaN = Pa \ PaY . Choices
+p
+p ∈ PaN have distances Di,a
+= D∞ , where D∞ = 2400m
+(i.e., WalkScore is zero), so that a neighbourhood with no
+amenity has fi = 0.
+
+Submodularity in the SingleChoice Case
+Theorem 1. Objective (2) is submodular when Adepth = ∅.
+Proof. First, we represent a solution as a set of actions S
+where each element e = (a, m) ∈ S consists in allocating an instance of amenity type a to a candidate location
+m. Note that it is feasible to have more than one instance
+of type a allocated to the same location, which can introduce identical (a, m) pairs. Since sets cannot contain duplicates, we construct an equivalent set M̄ by duplicating
+each node j ∈ M for cj times. Then, the ground set is
+V = {(a, m) : a ∈ Aplain , m ∈ M̄ } and objective (2)
+is a set function, F : 2V → R. Let S and T be solution sets
+such that S ⊆ T ⊆ V , and let e = (a′ , m′ ) ∈ V \ T . We
+show that ∆F (e|S) ≥ ∆F (e|T ).
+We denote the weighted walking distances at i under solution set S as liS and express ∆F (e|S) in terms of liS :
+1 X
+S∪{e}
+∆F (e|S) =
+(f (li
+) − f (liS )).
+(4)
+|N |
+
+Objective Function We maximize the average WalkScore
+across all residential locations
+1 X
+F =
+fi .
+(2)
+|N |
+i∈N
+
+fi is a PWL function of li parameterized by breakpoints t̄:
+fi = PiecewiseLinear(li , t̄), ∀i ∈ N.
+(3)
+Existing and Candidate Amenity Locations We introduce new amenities to built neighbourhoods with consideration of existing amenities, instead of allocating from scratch.
+The set of locations with existing instances of amenity type
+a is denoted as La . For candidate allocation locations M ,
+we set a capacity on the number of amenity instances that
+each candidate location j can accommodate (denoted as cj ,
+j ∈ M ) to represent potential physical constraints. Given
+the context of built cities, M can be underused spaces such
+as parking lots, as freeing up parking spaces and converting
+them into amenities has been recognized as an urban renewal
+model that reduces air pollution and improves the quality of
+life (Natalie Marchant 2020; Eric Reguly 2020). However,
+our framework can accommodate various types of locations.
+
+3
+
+i∈N
+
+In this SingleChoice case, we have A = Aplain and we consider the nearest choice for each a. Then, the distances are:
+S∪{e}
+
+li
+
+= w a′
+
+min
+
+j∈JaS′ ∪La′ ∪{m′ }
+
+liS = wa′
+
+min
+
+j∈JaS′ ∪La′
+
+dij + u,
+
+dij + u.
+
+(5)
+(6)
+
+u is the weighted distance to types a ∈ A \ {a′ }, which is
+not affected by e = (a′ , m′ ):
+X
+u=
+wa min dij .
+j∈JaS ∪La
+
+a∈A\{a′ }
+
+JaS′ is the set of locations allocated for type a′ under solution
+set S. La′ is the set of existing instances for a′ . For simplicS
+ity, we denote the minimum distance to a′ under S as Dia
+′:
+
+Theoretical Properties
+
+Computational Complexity
+We prove that WALKO PT is computationally hard even with
+a single amenity type and without depth of choice. This is
+achieved through a reduction from the widely studied and
+NP-Complete k-median problem to the decision version of
+WALKO PT. The proof is deferred to Appendix A.
+
+S
+Dia
+′ =
+
+min
+
+j∈JaS′ ∪La′
+
+dij .
+
+S
+Then, from Eqn. (6) we have liS = wa′ Dia
+′ + u. From Eqn.
+′
+(5), when the new location m does not reduce the distance
+S∪{e}
+S
+= liS
+to a′ under S (i.e., dim′ ≥ Dia
+′ ), we have li
+S∪{e}
+and thus f (li
+) = f (liS ). When m′ results in a new
+S∪{e}
+S
+minimum distance (i.e., dim′ < Dia
+=
+′ ), we have li
+wa′ dim′ + u. Therefore, ∆F (e|S) in Eqn. (4) is:
+X
+1
+S∪{e}
+∆F (e|S) =
+(f (li
+) − f (liS ))+
+|N |
+S
+
+Submodularity
+Seeking a polynomial-time approximation algorithm for
+WALKO PT, we analyzed its objective function for submodular structure. Formally, a set function F : 2V → R is submodular if it satisfies the diminishing returns property: for
+every S ⊆ T ⊆ V and e ∈ V \ T it holds that ∆F (e|S) ≥
+∆F (e|T ), where ∆F (e|S) := F (S ∪ {e}) − F (S) is the
+discrete derivative of F at S w.r.t. e.
+We show that the objective (2) is indeed submodular when
+depth of choice is not considered. This motivates the use of
+a greedy algorithm as a (1 − 1e )-approximation (Nemhauser,
+Wolsey, and Fisher 1978) when there is a single amenity type
+and no depth of choice, and as a heuristic (with no guarantees) otherwise. We also show that submodularity does not
+hold when considering depth of choice.
+
+dim′ ≥Dia′
+
+1
+|N |
+
+X
+
+S∪{e}
+
+(f (li
+
+) − f (liS ))
+
+S
+dim′ <Dia
+′
+
+which simplifies to
+∆F (e|S) =
+
+X
+1
+S
+(f (wa′ dim′ +u)−f (wa′ Dia
+′ +u)).
+|N | d < D
+im′
+
+14251
+
+S
+ia′
+
+X
+
+Similarly, for solution set T , we have
+X
+1
+T
+∆F (e|T ) =
+(f (wa′ dim′ +u)−f (wa′ Dia
+′ +u)),
+|N | d < D
+im′
+
+Second, we describe the assignment of amenities to residents. We ensure that each resident is assigned to one instance for types a ∈ Aplain and to one instance for each
+available choice for types a ∈ Adepth :
+X
+xija = 1, ∀i ∈ N, a ∈ Aplain ,
+
+T
+ia′
+
+where JaT′ is the set of locations allocated for type a′ under
+T
+T . Since S ⊆ T , we have JaS′ ⊆ JaT′ , which leads to Dia
+′ ≤
+S
+Dia′ . ∆F (e|S) can then be further grouped into two cases:
+∆F (e|S) =
+"
+X
+1
+S
+(f (wa′ dim′ + u) − f (wa′ Dia
+′ + u))+
+|N |
+T
+dim′ <Dia
+′
+#
+X
+S
+(f (wa′ dim′ + u) − f (wa′ Dia′ + u)) .
+
+j∈M ∪La
+
+X
+
+Note that for a ∈ Adepth , each choice p ∈ PaY should
+be a different instance of a. When the choice is assigned to
+an existing instance of an amenity type (j ∈ La ), we ensure that the instance appears only once among all choices
+for each resident. When the choice corresponds to candidate
+locations (j ∈ M ), we ensure that the number of choices
+provided at j does not exceed the number of instances allocated to j:
+X p
+xija ≤ 1, ∀j ∈ La , ∀i ∈ N, ∀a ∈ Adepth ,
+
+We compute and re-arrange ∆ = ∆F (e|S) − ∆F (e|T ):
+
+X
+
+T
+S
+(f (wa′ Dia
+′ + u)) − f (wa′ Dia′ + u))+
+
+T
+dim′ <Dia
+′
+
+#
+X
+
+S
+(f (wa′ dim′ + u) − f (wa′ Dia
+′ + u))
+
+p∈PaY
+
+.
+
+T ≤d
+S
+Dia
+′
+im′ <Dia′
+
+X
+
+T
+S
+We know that (wa′ Dia
+′ + u) ≤ (wa′ Dia′ + u) from S ⊆ T
+S
+and that (wa′ dim′ + u) ≤ (wa′ Dia′ + u) by definition of
+the second summation. Since WalkScore f () is monotonically decreasing, we have ∆ ≥ 0. We’ve thus proved that
+∆F (e|S) ≥ ∆F (e|T ), as desired.
+
+xpija ≤ yja , ∀j ∈ M, ∀i ∈ N, ∀a ∈ Adepth .
+
+p∈PaY
+
+Additionally, we ensure that all the amenities are allocated
+before they are assigned:
+xija ≤ yja , ∀i ∈ N, ∀j ∈ M ∪ La , ∀a ∈ Aplain ,
+
+No Submodularity with Depth of Choice We show that
+the objective function is not submodular by providing a
+counter-example in Appendix B.
+
+4
+
+xpija = 1, ∀p ∈ PaY , ∀i ∈ N, ∀a ∈ Adepth .
+
+j∈M ∪La
+
+T ≤d
+S
+Dia
+′
+im′ <Dia′
+
+∆=
+"
+1
+|N |
+
+yja ≤ cj , ∀j ∈ M.
+
+a∈A
+
+xpija ≤ yja , ∀i ∈ N, ∀j ∈ M ∪ La , ∀p ∈ PaY , ∀a ∈ Adepth .
+Finally, we describe the weighted walking distances based
+on Eqn. (1) and the PWL WalkScore:
+
+X  X
+X
+X
+li =
+wap
+xpija dij +
+wap D∞
+
+Models and Algorithms
+
+Mixed-Integer Linear Programming (MILP)
+
+a∈Adepth
+
+Variables Our MILP model has four sets of variables.
+First, for allocation, integer variable yja indicates the number of amenities of type a allocated to location j. Second, binary variables are used to indicate the assignment of amenities to residents. For amenity types where only the nearest
+instance is considered, xija = 1 indicates that residents at
+location i visit location j for type a. For types where depth
+of choice is considered, a fourth index is used and xpija = 1
+indicates that residents at location i visit location j for the
+pth nearest instance of type a. There are also two sets of continuous variables: li and fi represent the weighted distance
+and WalkScore for i, respectively. The number of discrete
+decision variables in the model is O(|M ||N |(|Aplain | +
+|Adepth |h)), where h = maxa∈Adepth |PaY |.
+
++
+
+X
+a∈Aplain
+
+p∈PaY
+
+wa
+
+X
+
+j∈M ∪La
+
+xija dij ,
+
+p∈PaN
+
+∀i ∈ N.
+
+j∈M ∪La
+
+For the PWL in Eqn. (3), commercial MILP solvers provide
+the functionality for linearizing PWL functions (Gurobi Optimization 2022).
+Objective The objective is to maximize F in Eqn. (2).
+
+Constraint Programming Model (CP)
+We also provide a CP model for WALKO PT. CP allows for
+an index-based formulation in which decision variables indicate the index of the location of each instance of a ∈ A.
+This significantly reduces the number of discrete variables
+compared to the binary formulation in MILP, particularly in
+the case without depth of choice. Specifically, the number of
+discrete decision variables is O(k|A|+h|N ||Adepth |) where
+k = maxa∈A ka and h = maxa∈Adepth |PaY |. The model is
+deferred to Appendix C.
+
+Constraints First, we enforce the requirements on the
+maximum number of amenities to be allocated and the capacity of each candidate allocation location:
+X
+yja ≤ ka , ∀a ∈ A,
+j∈M
+
+14252
+
+Algorithm 1: Greedy Algorithm
+
+PedNet for each NIA. An alternative to PedNet is OpenStreetMap which provides walking routes data worldwide,
+which may enable case studies in other cities in the future.
+We use PedNet in our case study since it undertook quality
+assurance and has been used in a walking time assessment
+report by the Transportation Services and Information and
+Technology Division (City of Toronto 2019b).
+
+1: S ← ∅.
+2: na ← 0 for all a ∈ A. {na : Number of allocated in-
+
+stances for type a}
+3: c[j] ← cj for all j ∈ M .
+4: while ∃na < ka and maxj∈M (c[j]) > 0 do
+5:
+
+(a, j) ← argmax
+
+a∈A
+na <ka ,j∈M
+c[j]>0
+
+P
+
+S∪{(a,j)}
+)
+i∈N f (li
+
+Residence and Candidate Locations The locations of
+residential areas and potential allocation candidates are obtained from OpenStreetMap (OpenStreetMap contributors
+2017) and mapped to the nearest nodes in the PedNet. Residential nodes N are the set of nodes that map to at least one
+residential address. As mentioned in Section 2, our candidate allocation nodes M are parking lots. For this case study,
+the capacity of each candidate node cj is the number of parking lots mapped to the node j.
+
+6:
+S ← S ∪ (a, j)
+7:
+na ← na + 1
+8:
+c[j] ← c[j] − 1
+9: end while
+10: return S
+
+Greedy Algorithm (Greedy)
+
+Amenity Weights In this case study, we consider 3 types
+of amenities: grocery stores, restaurants, and schools, for
+which the locations of existing instances are also obtained
+from OpenStreetMap. These 3 types are chosen because they
+are the major categories that the WalkScore methodology
+considers (Walk Score 2011) and the data provided by OpenStreetMap is relatively rich for these 3 types based on our
+visual inspection. The weights wa (for different types) and
+wap (for different choices) are obtained from the WalkScore
+methodology documentation (Walk Score 2011), and the
+values are listed in Appendix D.
+
+Motivated by the submodularity in the SingleChoice case,
+we use a greedy algorithm that iteratively selects the
+(amenity type, location) pair that maximizes the increase in
+the objective. We also use Greedy as a heuristic when considering depth ofP
+choice and multiple amenity types. Greedy
+runs in time O(( a∈A ka )|M ||N ||A|h) and is shown in Algorithm 1. The solution set S contains (a, j) pairs that represent the action of allocating an instance of type a to location
+j. We denote the weighted walking distance of i under solution set S as liS . The WalkScore function is denoted as f ().
+
+5
+
+Case Study
+
+Computational Setup
+
+We perform a case study for 31 underserved neighbourhoods
+in Toronto, Canada. The City of Toronto has identified 31 of
+its 140 neighbourhoods as Neighbourhood Improvement Areas (NIAs) that are facing the most inequitable outcomes
+under the Toronto Strong Neighbourhood Strategy (TSNS)
+2020 (City of Toronto 2022). TSNS aims to provide equitable social, economic, and cultural opportunities for all
+residents by partnering with agencies to invest in services
+and facilities in neighbourhoods that face historic underinvestment, and the NIAs capture areas of the city with a significant concentration of disadvantaged and equity-seeking
+groups, particularly visible minorities. Low walkability and
+limited access to amenities in the physical surroundings are
+important criteria in the selection of the NIAs (Social Policy
+Analysis and Research, City of Toronto 2014).
+
+We perform experiments under two scenarios. In the first
+(MultiChoice), the distance to the nearest instance is considered for groceries and schools, while the distances to the
+top 10 nearest choices are considered for restaurants. In the
+second (SingleChoice), the distance to the nearest instance
+is considered for all 3 amenity types. MultiChoice is consistent with the original WalkScore methodology (Walk Score
+2011), while the SingleChoice scenario helps assess the effect of depth of choice on walkability and solving difficulty.
+Instances Throughout the case study, we use the same upper bound for the 3 amenity types considered: ka = k, ∀a ∈
+A. We create 9 instances for each NIA with k ∈ {1, 2, ..., 9}.
+The 31 NIAs are split into 4 groups according to the size
+(|M | + |N |). The number of NIAs (# NIA) and the number
+of instances (# Inst.) for each NIA group are shown in Table
+1.
+
+Data
+Neighbourhood Improvement Areas (NIAs) We create
+instances of WALKO PT from each NIA. The geographical
+boundary of the NIAs is publicly available from The City of
+Toronto’s Open Data Portal (Social Development, Finance
+and Administration, City of Toronto 2019).
+
+Setup All methods are implemented in Python. MILP and
+CP models are solved with Gurobi and CP Optimizer, respectively, and 8 threads. Experiments were run on Intel E52683 v4 Broadwell at 2.1GHz CPUs and a memory limit of
+32GB. Each solving run is limited to 5 hours. We use a relatively large time limit since a few hours of computation is
+tiny compared to the service time (in years) of an amenity.
+
+Pedestrian Network To obtain the network of walkable
+paths, we use a publicly available Pedestrian Network (PedNet) of Toronto which includes various pedestrian assets
+such as sidewalks, crosswalks, and pedestrian-controlled
+crossings that are topologically consistent (City of Toronto
+2019a). We precompute the shortest-path pairs based on
+
+6
+
+Results
+
+Comparison of Solution Methods
+14253
+
+Group
+
+Network Size
+|M | + |N |
+
+# NIA
+
+# Inst.
+
+Groceries
+
+Restaurants
+
+Schools
+
+1
+2
+3
+4
+
+[0,200)
+[200,400)
+[400,600)
+[600,1200)
+
+11
+13
+4
+3
+
+99
+117
+36
+27
+
+1.45
+2.00
+4.50
+6.67
+
+5.73
+11.85
+14.50
+19.00
+
+3.18
+5.46
+9.25
+14.33
+
+Shifted Geo Mean (s)
+
+Table 1: Instance statistics. The last 3 columns are averages.
+43.800
+
+MILP
+CP
+Greedy
+
+15000
+10000
+
+43.775
+
+MILP
+CP
+Greedy
+
+5000
+0
+
+43.750
+
+135
+2
+
+21
+3
+
+22
+5
+
+43.725
+
+6
+
+43.700
+43.675
+
+25
+
+26
+
+28
+113
+
+2
+
+3
+Group
+
+4
+
+1
+
+2
+
+3
+Group
+
+43.625
+
+4
+
+55
+
+112
+115 110
+111 91
+
+43.650
+
+1
+
+137
+
+27
+
+24
+
+44
+
+43
+
+136
+
+138 139
+
+125
+124
+61 121
+
+79.5
+
+40
+30
+
+72
+
+20
+
+85
+
+79.6
+
+50
+
+10
+79.4
+
+79.3
+
+79.2
+
+Figure 3: Change in average WalkScore with MultiChoice WALKO PT (k = 3). NIAs are labeled by their IDs
+(neighborhood names in Appendix F).
+
+Figure 2: Shifted Geometric Mean in seconds across k ∈
+{1, 2, ..., 9} in SingleChoice (left) & MultiChoice (right).
+Solving time We first study how the computational running times scale with increasing network size (|M | + |N |).
+For each NIA, we measure the Shifted Geometric Mean of
+the solving time across k ∈ {1, 2, ..., 9} (see (ACHTERBERG 2007), section A.3, for a definition of this widely
+used summary statistic). Fig. 2 shows the results for each
+NIA group. Greedy is orders of magnitude faster than MILP
+and CP and scales well in both scenarios. The solving times
+for CP and MILP in the two scenarios show that the difficulty of the problem significantly increases when considering depth of choice. In SingleChoice, the solving time for
+MILP is shorter than CP in medium and small instances but
+increases rapidly for large instances, performing worse than
+CP in Group 4. A possible explanation is that the number
+of discrete variables of the CP formulation does not depend
+on |M | or |N | in this scenario, as discussed in Section 4. In
+MultiChoice, MILP scales better than CP overall.
+
+hold.
+
+Empirical Evaluation
+What is the effect of solving WALKO PT on the WalkScore
+and travel distances from residents to amenities, in terms
+of different neighborhoods and residential locations? To answer this question, we use solutions of MILP for instances
+where it is feasible since MILP has the lowest MRE on average. For instances where MILP did not find a feasible solution, Greedy’s solutions are used.
+Impact on WalkScore Fig. 3 shows the change in the
+average WalkScore for each NIA when additional amenities are introduced by optimization. Most NIAs lie in the
+mostly-industrial northwest and the suburban/rural northeast
+of Toronto, where infrastructure is limited. In contrast, few
+NIAs lie in the urban core in the south where amenities
+are dense, which is consistent with the reported walkability of Toronto (Toronto Public Health 2012; City of Toronto
+2019b). The change in WalkScore varies across NIAs.
+Adding 3 amenities of each type improves the WalkScore
+by more than 50 for 4 NIAs. We observe that NIAs with low
+current WalkScore show greater improvement after allocation; current WalkScore for each NIA in Appendix G.
+Additionally, we show how the average WalkScore across
+all NIAs changes w.r.t. the value of k (Fig. 4). The objective exhibits diminishing returns as k increases in the SingleChoice scenario but not in MultiChoice; this agrees with
+the submodularity analyses of Section 3. Looking at the
+travel distances, we see that the framework effectively reduces walking distances for all types/choices considered.
+
+Solution Quality Next, we compare the methods in terms
+of three metrics: the Mean Relative Error (MRE), the number of instances for which the method found a feasible solution, and the number of instances for which the method
+proved optimality (Table 2). MRE measures the gap between
+the best solution found by a method and the best solution
+found across all methods, normalized by the latter. MILP
+has the lowest MRE for all groups in both scenarios. However, MILP struggles to find feasible solutions for large instances in MultiChoice (Group 4), while CP and Greedy find
+feasible solutions to all instances. The MRE of Greedy is
+lower than 0.7% for all groups in both scenarios and is significantly lower than CP for medium and large instances in
+MultiChoice. This shows that Greedy produces high-quality
+solutions as a heuristic even when submodularity does not
+14254
+
+SingleChoice
+Group
+
+Method
+
+MRE (%)
+
+1
+(99)
+
+MILP
+CP
+Greedy
+
+2
+(117)
+
+MultiChoice
+
+Feas
+
+Opt
+
+MRE(%)
+
+Feas
+
+Opt
+
+0.00
+0.00
+0.29
+
+99
+99
+99
+
+99
+59
+N/A
+
+0.00
+0.43
+0.66
+
+99
+99
+99
+
+97
+14
+N/A
+
+MILP
+CP
+Greedy
+
+0.00
+0.01
+0.34
+
+117
+117
+117
+
+116
+31
+N/A
+
+0.00
+3.34
+0.51
+
+117
+117
+117
+
+29
+1
+N/A
+
+3
+(36)
+
+MILP
+CP
+Greedy
+
+0.00
+0.04
+0.38
+
+36
+36
+36
+
+33
+9
+N/A
+
+0.00
+12.41
+0.57
+
+36
+36
+36
+
+0
+1
+N/A
+
+4
+(27)
+
+MILP
+CP
+Greedy
+
+0.00
+0.91
+0.51
+
+27
+27
+27
+
+1
+3
+N/A
+
+0.05
+26.13
+0.20
+
+21
+27
+27
+
+0
+0
+N/A
+
+Table 2: Mean relative error (MRE), number of instances for which the method found a feasible solution (Feas) and proved
+optimality (Opt) for each NIA group. The total number of instances in each group is shown in brackets.
+
+Score
+
+600
+500
+
+70
+60
+
+400
+300
+
+80
+
+0
+
+2
+
+4
+
+k
+
+6
+
+8
+
+50
+
+Grocery
+Restaurant (1st)
+School
+Restaurant (2nd)
+
+900
+800
+700
+
+Score
+
+600
+500
+
+80
+70
+60
+
+400
+300
+
+existing residential locations, candidate allocation locations,
+and existing amenities. Allocated amenities seem to fall at
+the heart of residential clusters. Perhaps more interestingly,
+some newly allocated amenities are very close to the locations of other types of amenities (existing or allocated) and
+seem to form an urban center with a mix of different types.
+
+90
+
+Score
+
+700
+
+90
+
+Score
+
+Distance (Meters)
+
+800
+
+Distance (Meters)
+
+Grocery
+Restaurant
+School
+
+900
+
+0
+
+2
+
+4
+
+k
+
+6
+
+8
+
+50
+
+7
+
+Related Work
+
+Walkability Optimization
+Figure 4: Average WalkScore and travel distances to different amenity types w.r.t. k in SingleChoice (left) & MultiChoice (right). For MultiChoice, distances to the 1st and 2nd
+restaurants are shown.
+
+The Introduction already discusses some of the most relevant work that uses genetic algorithms. To further elaborate, Cichocka (2015) optimizes for each different amenity
+type independently, which may hinder optimality. Moreover, existing works suffer from unrealistic assumptions that
+limit the applicability of the framework and the quality of
+empirical evaluation such as designing street grid patterns
+from scratch (Lima, Brown, and Duarte 2022) and allocating amenities to empty street layout (Rakha and Reinhart
+2012). Sonta and Jain (2019) perform a case study in an existing city but only use randomly sampled residential units
+and ignore current amenity locations, generating solutions
+that override existing infrastructure.
+
+Individual Residential Locations We analyze the impact
+of WALKO PT on individual residential locations using a histogram of walking times to the 3 amenity types for all residential nodes in all 31 NIAs (Fig. 5). Distance-to-time conversion is done using a walking speed of 1.2m/s (Traffic
+Management, City of Toronto 2018). In the MultiChoice
+case, an allocation with k = 3 reduces the walking distances
+of the 75th percentile of all individual residential locations to
+10 minutes for all amenity types. According to Toronto Public Health (2012), a residential preference survey reveals that
+a 10-minute walking distance to stores and services characterizes a walkable neighbourhood. For grocery stores, this
+reduction in distance, of up to half relative to the current
+state, is significant. For schools, we do not observe a large
+improvement in the mean or the 75th percentile; most residents can walk to a school within 10 minutes currently. As
+schools are non-commercial, their locations may have been
+well-optimized historically. However, we do observe a large
+reduction in the maximum walking times to schools.
+
+k-Median and Facility Location Problem (FLP)
+Compared to the FLP, WALKO PT considers multiple facility types and depth of choice. Without these, WALKO PT is
+equivalent to the Submodular FLP defined in (Lindgren, Wu,
+and Dimakis 2015), and previous work has shown that objective (2) is submodular in this case (Frieze 1974).
+Moreover, the objective function WalkScore does not satisfy the properties of a metric space, in contrast to the closely
+related k-median problem. Algorithms for k-median that
+provide better approximation ratios than standard greedy include reverse greedy (Chrobak, Mathieu, and Young 2005),
+local search (Arya et al. 2001), LP relaxation (Charikar et al.
+1999; Charikar and Li 2012), and Lagrangian relaxation
+
+Visualization of allocated amenities Fig. 6 illustrates
+a WALKO PT solution for NIA Victoria Village along with
+14255
+
+600
+
+k=0
+Mean (k=0): 13.90
+75% (k=0): 18.42
+Max: (k=0): 78.40
+k=3
+Mean (k=3): 7.21
+75% (k=3): 9.57
+Max (k=3): 27.21
+
+500
+400
+300
+200
+100
+0
+
+0
+
+10
+
+20
+
+30
+
+40
+
+50
+
+60
+
+Walking Time (Minutes)
+
+(a) Grocery
+
+70
+
+80
+
+k=0
+Mean (k=0): 11.19
+75% (k=0): 15.28
+Max: (k=0): 54.04
+k=3
+Mean (k=3): 7.63
+75% (k=3): 10.28
+Max (k=3): 32.69
+
+350
+300
+250
+200
+150
+100
+
+350
+
+250
+200
+150
+100
+
+50
+
+50
+
+0
+
+0
+
+0
+
+10
+
+20
+
+30
+
+40
+
+Walking Time (Minutes)
+
+50
+
+k=0
+Mean (k=0): 14.84
+75% (k=0): 19.84
+Max: (k=0): 55.08
+k=3
+Mean (k=3): 10.27
+75% (k=3): 13.67
+Max (k=3): 36.37
+
+300
+
+(b) 1st Nearest Restaurant
+
+k=0
+Mean (k=0): 7.61
+75% (k=0): 9.78
+Max: (k=0): 70.05
+k=3
+Mean (k=3): 5.56
+75% (k=3): 7.44
+Max (k=3): 33.25
+
+600
+500
+400
+300
+200
+100
+
+0
+
+10
+
+20
+
+30
+
+40
+
+Walking Time (Minutes)
+
+50
+
+0
+
+0
+
+10
+
+(c) 2nd Nearest Restaurant
+
+20
+
+30
+
+40
+
+50
+
+Walking Time (Minutes)
+
+60
+
+70
+
+(d) School
+
+Figure 5: Histogram of walking times to different amenity types across all residential nodes in all neighbourhoods. Adding k =
+3 amenities shifts the histogram of walking times to the left (in orange), which also translates into smaller mean/maximum/75th
+percentile walking times relative to not adding any amenities (in blue).
+lar structure of the WALKO PT objective (without depth of
+choice). An experimental evaluation on high-quality data
+from Toronto shows that MILP and Greedy are effective at
+producing high-quality solutions, with a scalability advantage for the latter. Our framework produces solutions that
+significantly improve the walkability in underserved neighbourhoods on average and reduce the walking distances for
+individual residential locations.
+While we have prioritized incorporating realistic facets of
+walkability optimization into our formulation, more can potentially be done by: considering the population at each residential location, the construction cost at each candidate allocation location, the area/size of candidate locations, and the
+service capacity of amenities. If the data is available, these
+can be easily integrated into the objective and constraints. In
+addition, WALKO PT quantifies walkability in terms of travel
+distances without considering other factors that may affect
+accessibility such as the safety/quality of walking paths,
+which can potentially be incorporated into the formulation
+by applying penalties appropriately. Lastly, our experiments
+were based on neighbourhood-scale instances; testing our
+methods at full city-scale might be of future interest.
+
+Figure 6: Allocated amenities at Victoria Village: 2 newly
+introduced groceries, restaurants, and schools.
+
+References
+ACHTERBERG, T. 2007. Constraint Integer Programming.
+Ph. D. Thesis, Technische Universitat Berlin.
+
+(Jain and Vazirani 2001; Jain et al. 2003). However, these
+algorithms assume that the objective function is defined on
+a metric space and are not applicable to our problem.
+
+8
+
+Arya, V.; Garg, N.; Khandekar, R.; Meyerson, A.; Munagala,
+K.; and Pandit, V. 2001. Local search heuristic for k-median
+and facility location problems. In STOC ’01.
+
+Conclusion and Discussion
+
+Brand, C.; Götschi, T.; Dons, E.; Gerike, R.; Anaya-Boig,
+E.; Avila-Palencia, I.; de Nazelle, A.; Gascon, M.; GauppBerghausen, M.; Iacorossi, F.; Kahlmeier, S.; Int Panis, L.;
+Racioppi, F.; Rojas-Rueda, D.; Standaert, A.; Stigell, E.; Sulikova, S.; Wegener, S.; and Nieuwenhuijsen, M. J. 2021.
+The climate change mitigation impacts of active travel: Evidence from a longitudinal panel study in seven European
+cities. Global Environmental Change, 67: 102224.
+
+Automobile-reliant communities with limited access to
+amenities in their vicinity have a great potential for transformation into more walkable and sustainable neigbhbourhoods. We formulate the problem of Walkability Optimization where amenities are introduced at strategic locations to
+improve the proximity to residents. Our WALKO PT formulation realistically models residents’ behaviour by integrating multiple amenity types, depth of choice, and an objective function representing the proximity to amenities. We
+also take into account existing amenities in the context of
+built cities. We provide MILP and CP formulations and
+an efficient greedy algorithm motivated by the submodu-
+
+Charikar, M.; Guha, S.; Tardos, E.; and Shmoys, D. 1999.
+A constant-factor approximation algorithm for the k-median
+problem. Proceedings of 31st Annual ACM Symposium on
+Theory of Computing, 1–10.
+14256
+
+Charikar, M.; and Li, S. 2012. A Dependent LP-Rounding
+Approach for the k-Median Problem. In ICALP.
+Chrobak, M.; Mathieu, C.; and Young, N. 2005. The reverse
+greedy algorithm for the metric k-median problem. Inf. Process. Lett., 97: 68–72.
+Cichocka, J. M. 2015. Generative design optimization in
+urban planning: walkability-optimized city concept. Architectus, 119–128.
+City of Toronto. 2019a. Toronto Walkability Project. https:
+//github.com/gcc-dav-official-github/dav cot walkability.
+Accessed: 2022-07-17.
+City of Toronto. 2019b. Walkability Report. https://ckan0.
+cf.opendata.inter.prod-toronto.ca/dataset/4b5c7a84-dea14137-875d-71d7f662c83f/resource/d546f5d1-ecc2-4237bcc9-84000715b60a/download/Toronto%20Walkability%
+20Analysis.pdf. Accessed: 2022-08-01.
+City of Toronto. 2022.
+Neighbourhood Improvement Area Profiles.
+https://www.toronto.ca/citygovernment/data-research-maps/neighbourhoodscommunities/neighbourhood-profiles/nia-profiles/.
+Accessed: 2022-07-17.
+Creutzig, F.; Roy, J.; Lamb, W. F.; Azevedo, I. M. L.;
+de Bruin, W. B.; Dalkmann, H.; Edelenbosch, O. Y.; Geels,
+F. W.; Grubler, A.; Hepburn, C.; Hertwich, E. G.; Khosla, R.;
+Mattauch, L.; Minx, J. C.; Ramakrishnan, A.; Rao, N. D.;
+Steinberger, J. K.; Tavoni, M.; ürge Vorsatz, D.; and Weber,
+E. U. 2018. Towards demand-side solutions for mitigating
+climate change. Nature Climate Change, 8: 260–263.
+Duncan, D. T.; Aldstadt, J.; Whalen, J.; Melly, S.; and Gortmaker, S. L. 2011. Validation of Walk Score® for Estimating Neighborhood Walkability: An Analysis of Four US
+Metropolitan Areas. International Journal of Environmental
+Research and Public Health, 8: 4160 – 4179.
+Eric Reguly. 2020. Bikes, pedestrians and the 15-minute
+city: How the pandemic is propelling urban revolutions.
+https://www.theglobeandmail.com/canada/articlebikes-pedestrians-and-the-15-minute-city-howthe-pandemic-is/? sp=64b0e81e-9061-4f86-94b9c74d400683e3.1619052392166. Accessed: 2022-07-17.
+Fischel, W. A. 2003. An Economic History of Zoning and a
+Cure for its Exclusionary Effects. Urban Studies, 41: 317 –
+340.
+Frieze, A. M. 1974. A cost function property for plant location problems. Mathematical Programming, 7: 245–248.
+Gurobi Optimization. 2022. Model.addGenConstrPWL().
+https://www.gurobi.com/documentation/9.1/refman/
+py model agc pwl.html. Accessed: 2022-08-14.
+Indraprastha, A. 2019. Informed Walkable City Model - Developing A Multi-Objective Optimization Model for Evaluating Walkability Concept. Proceedings of the 24th Conference on Computer Aided Architectural Design Research in
+Asia (CAADRIA) [Volume 2].
+Jain, K.; and Vazirani, V. V. 2001. Approximation Algorithms for Metric Facility Location and K-Median Problems
+Using the Primal-Dual Schema and Lagrangian Relaxation.
+J. ACM, 48(2): 274–296.
+
+Jain, K. K.; Mahdian, M.; Markakis, E. K.; Saberi, A.; and
+Vazirani, V. V. 2003. Greedy facility location algorithms
+analyzed using dual fitting with factor-revealing LP. ArXiv,
+cs.DS/0207028.
+Kim, B. M.; Kim, Y. B.; and Oh, C. H. 1997. A study on the
+convergence of genetic algorithms. Computers & Industrial
+Engineering, 33: 581–588.
+Lee, C.; and Moudon, A. V. 2006. Correlates of walking for
+transportation or recreation purposes. Journal of Physical
+Activity and health, 3(s1): S77–S98.
+Levine, J. 2005. Zoned Out: Regulation, Markets, and
+Choices in Transportation and Metropolitan Land Use.
+Hoboken: Taylor and Francis.
+Lima, F. T.; Brown, N. C.; and Duarte, J. P. 2022. A
+grammar-based optimization approach for walkable urban
+fabrics considering pedestrian accessibility and infrastructure cost. Environment and Planning B: Urban Analytics
+and City Science, 49: 1489 – 1506.
+Lindgren, E. M.; Wu, S.; and Dimakis, A. G. 2015. Sparse
+and greedy: Sparsifying submodular facility location problems. In NIPS Workshop on Optimization for Machine
+Learning.
+Massey, D. S. 1990. American Apartheid: Segregation and
+the Making of the Underclass. American Journal of Sociology, 96: 329 – 357.
+McIntosh, J.; Trubka, R.; Kenworthy, J.; and Newman, P.
+2014. The role of urban form and transit in city car dependence: Analysis of 26 global cities from 1960 to 2000.
+Transportation Research Part D: Transport and Environment, 33: 95–110.
+Mouratidis, K. 2021. How COVID-19 reshaped quality of
+life in cities: A synthesis and implications for urban planning. Land Use Policy, 111: 105772.
+Nagy, D.; Villaggi, L.; and Benjamin, D. 2018. Generative
+urban design: integrating financial and energy goals for automated neighborhood layout. In Proceedings of the Symposium for Architecture and Urban Design Design, Delft, the
+Netherlands, 265–274.
+Natalie Marchant. 2020.
+Paris halves street parking and asks residents what they want to do with the
+space.
+https://www.weforum.org/agenda/2020/12/parisparking-spaces-greenery-cities/. Accessed: 2022-07-17.
+Nemhauser, G. L.; Wolsey, L. A.; and Fisher, M. L. 1978.
+An analysis of approximations for maximizing submodular
+set functions—I. Mathematical Programming, 14: 265–294.
+Neves, A.; and Brand, C. 2019. Assessing the potential
+for carbon emissions savings from replacing short car trips
+with walking and cycling using a mixed GPS-travel diary
+approach. Transportation Research Part A: Policy and Practice.
+Ngueveu, S. U. 2019. Piecewise linear bounding of univariate nonlinear functions and resulting mixed integer linear
+programming-based solution methods. Eur. J. Oper. Res.,
+275: 1058–1071.
+OpenStreetMap contributors. 2017. Planet dump retrieved
+from https://planet.osm.org . https://www.openstreetmap.
+org. Accessed: 2022-07-17.
+14257
+
+Rakha, T.; and Reinhart, C. 2012. Generative urban modeling: a design work flow for walkability-optimized cities.
+Proceedings of SimBuild, 5(1): 255–262.
+Reyer, M.; Fina, S.; Siedentop, S.; and Schlicht, W. 2014.
+Walkability is Only Part of the Story: Walking for Transportation in Stuttgart, Germany. International Journal of Environmental Research and Public Health, 11: 5849 – 5865.
+Social Development, Finance and Administration, City
+of Toronto. 2019.
+About Neighbourhood Improvement Areas. https://open.toronto.ca/dataset/neighbourhoodimprovement-areas/. Accessed: 2022-07-17.
+Social Policy Analysis and Research, City of Toronto.
+2014. TSNS 2020 NEIGHBOURHOOD EQUITY INDEX
+Methodological Documentation. https://www.toronto.ca/
+legdocs/mmis/2014/cd/bgrd/backgroundfile-67350.pdf. Accessed: 2022-07-17.
+Sonta, A. J.; and Jain, R. K. 2019.
+Optimizing
+Neighborhood-Scale Walkability. Computing in Civil Engineering 2019.
+Toronto Public Health. 2012. The Walkable City: Neighbourhood Design and Preferences, Travel Choices and
+Health. https://www.toronto.ca/wp-content/uploads/2017/
+10/9617-TPH-walkable-city-report.pdf. Accessed: 202208-01.
+Traffic Management, City of Toronto. 2018.
+Pedestrian Timing at Signalised Intersections. https://www.
+toronto.ca/wp-content/uploads/2019/01/96a8-TS TrafficManagement Pedestrian-Timing-Guidelines.pdf. Accessed:
+2022-07-17.
+Verbas, I. Ö.; Frei, C.; Mahmassani, H. S.; and Chan, R.
+2015. Stretching resources: sensitivity of optimal bus frequency allocation to stop-level demand elasticities. Public
+Transport, 7: 1–20.
+Walk Score. 2011.
+Walk Score Methodology.
+http://pubs.cedeus.cl/omeka/files/original/
+b6fa690993d59007784a7a26804d42be.pdf.
+Accessed:
+2022-07-17.
+Whittle, N. 2020. Welcome to the 15-minute city. Financial
+Times, 17.
+Yang, X.-S. 2020. Nature-inspired optimization algorithms.
+Academic Press.
+Yang, Y.; Samaranayake, S.; and Dogan, T. 2020. An adaptive workflow to generate street network and amenity allocation for walkable neighborhood design. Proceedings of
+the Symposium on Simulation for Architecture and Urban
+Design.
+Zapata-Diomedi, B.; Boulangé, C. L.; Giles-Corti, B.; Phelan, K.; Washington, S.; Veerman, J. L.; and Gunn, L. D.
+2019. Physical activity-related health and economic benefits
+of building walkable neighbourhoods: a modelled comparison between brownfield and greenfield developments. The
+International Journal of Behavioral Nutrition and Physical
+Activity, 16.
+
+14258
+
+

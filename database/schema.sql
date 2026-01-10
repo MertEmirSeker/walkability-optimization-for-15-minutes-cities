@@ -40,21 +40,31 @@ CREATE INDEX idx_edges_to ON edges(to_node_id);
 CREATE INDEX idx_edges_way ON edges(osm_way_id);
 
 -- Residential locations table: Subset of nodes (N)
+-- NOTE: Multiple residential locations can map to the same network node (snap point)
+-- Each residential building is unique, but they may share pathfinding nodes
 CREATE TABLE residential_locations (
     residential_id BIGSERIAL PRIMARY KEY,
-    node_id BIGINT NOT NULL UNIQUE REFERENCES nodes(node_id) ON DELETE CASCADE,
+    node_id BIGINT NOT NULL REFERENCES nodes(node_id) ON DELETE CASCADE,
+    snapped_node_id BIGINT REFERENCES nodes(node_id) ON DELETE SET NULL,  -- Network node for pathfinding
+    osm_building_id BIGINT UNIQUE,  -- Original OSM building ID for uniqueness
+    original_latitude DECIMAL(10, 8),  -- Original building centroid lat
+    original_longitude DECIMAL(11, 8), -- Original building centroid lon
     address TEXT,
     building_type VARCHAR(50),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_residential_node ON residential_locations(node_id);
+CREATE INDEX idx_residential_snapped_node ON residential_locations(snapped_node_id);
 
 -- Candidate locations table: Potential allocation sites (M)
 -- e.g., parking lots, empty lots, underused spaces
 CREATE TABLE candidate_locations (
     candidate_id BIGSERIAL PRIMARY KEY,
     node_id BIGINT NOT NULL UNIQUE REFERENCES nodes(node_id) ON DELETE CASCADE,
+    snapped_node_id BIGINT REFERENCES nodes(node_id) ON DELETE SET NULL,  -- Network node for pathfinding
+    original_latitude DECIMAL(10, 8),  -- Original candidate lat
+    original_longitude DECIMAL(11, 8), -- Original candidate lon
     capacity INTEGER NOT NULL DEFAULT 1, -- Maximum number of amenities that can be allocated
     location_type VARCHAR(50), -- parking_lot, empty_lot, etc.
     area_sqm DECIMAL(10, 2),
@@ -62,6 +72,7 @@ CREATE TABLE candidate_locations (
 );
 
 CREATE INDEX idx_candidate_node ON candidate_locations(node_id);
+CREATE INDEX idx_candidate_snapped_node ON candidate_locations(snapped_node_id);
 
 -- Amenity types table: Types of amenities and their weights
 CREATE TABLE amenity_types (
@@ -102,17 +113,22 @@ SELECT amenity_type_id, generate_series(1, 10),
 FROM amenity_types WHERE type_name = 'restaurant';
 
 -- Existing amenities table: Current amenities in the network (L)
+-- NOTE: Multiple amenities can map to the same network node (snap point)
 CREATE TABLE existing_amenities (
     amenity_id BIGSERIAL PRIMARY KEY,
     node_id BIGINT NOT NULL REFERENCES nodes(node_id) ON DELETE CASCADE,
+    snapped_node_id BIGINT REFERENCES nodes(node_id) ON DELETE SET NULL,  -- Network node for pathfinding
     amenity_type_id INTEGER NOT NULL REFERENCES amenity_types(amenity_type_id),
     name TEXT,
     osm_id BIGINT,
+    original_latitude DECIMAL(10, 8),  -- Original amenity lat
+    original_longitude DECIMAL(11, 8), -- Original amenity lon
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(node_id, amenity_type_id)
+    UNIQUE(osm_id, amenity_type_id)  -- Changed: unique by OSM ID, not node_id
 );
 
 CREATE INDEX idx_existing_amenity_node ON existing_amenities(node_id);
+CREATE INDEX idx_existing_amenity_snapped_node ON existing_amenities(snapped_node_id);
 CREATE INDEX idx_existing_amenity_type ON existing_amenities(amenity_type_id);
 
 -- Shortest paths table: Pre-computed shortest path distances

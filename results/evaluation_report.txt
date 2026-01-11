@@ -3,17 +3,17 @@ WALKABILITY OPTIMIZATION EVALUATION REPORT
 ================================================================================
 
 Scenario: baseline
-  Average WalkScore: 9.21
+  Average WalkScore: 56.95
   WalkScore Increase: 0.00 points
   Distance Reduction: 0.00%
-  15-Minute Coverage: 0.00%
+  15-Minute Coverage: 76.63%
   Success: ✗
 
 Scenario: greedy_k1
-  Average WalkScore: 9.20
-  WalkScore Increase: -0.01 points
+  Average WalkScore: 61.64
+  WalkScore Increase: 4.69 points
   Distance Reduction: 0.00%
-  15-Minute Coverage: 0.00%
+  15-Minute Coverage: 76.63%
   Success: ✗
 
 ================================================================================

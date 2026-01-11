@@ -216,28 +216,40 @@ class WalkScoreCalculator:
     
     def compute_baseline_scores(self, save_to_db: bool = True) -> Dict[int, float]:
         """
-        Compute baseline WalkScores for all residential locations.
+        Compute baseline WalkScores for ALL residential buildings.
+        
+        ✅ FIXED: Computes score for EVERY building (26,931), not just unique network nodes.
         
         Returns:
             Dict mapping residential_id -> WalkScore
         """
-        print("Computing baseline WalkScores...")
+        print("Computing baseline WalkScores for all residential buildings...")
         
         scores: Dict[int, float] = {}
-        residential_ids = list(self.graph.N)
-        total = len(residential_ids)
-        batch_size = 500  # number of residential nodes per batch
+        weighted_distances: Dict[int, float] = {}  # ✅ NEW: Cache weighted distances
+        total = len(self.graph.residential_buildings)
+        batch_size = 500
+        
+        print(f"Total buildings: {total}")
         
         for start in range(0, total, batch_size):
             end = min(start + batch_size, total)
-            batch_ids = residential_ids[start:end]
+            batch = self.graph.residential_buildings[start:end]
             
-            # Load only distances for this batch
-            self.path_calculator.load_batch_for_residential(batch_ids)
+            # Extract snapped node IDs for this batch
+            snapped_node_ids = [snap_id for _, snap_id in batch]
             
-            for i, res_id in enumerate(batch_ids, start=start + 1):
-                score = self.compute_walkscore(res_id)
-                scores[res_id] = score
+            # Load distances for these network nodes
+            self.path_calculator.load_batch_for_residential(snapped_node_ids)
+            
+            for i, (residential_id, snapped_node_id) in enumerate(batch, start=start + 1):
+                # Use snapped_node_id for pathfinding
+                weighted_dist = self.compute_weighted_distance(snapped_node_id)
+                score = self.piecewise_linear_score(weighted_dist)
+                
+                # Store with residential_id (building ID)
+                scores[residential_id] = score
+                weighted_distances[residential_id] = weighted_dist
                 
                 if i % 100 == 0:
                     print(f"  Computed {i}/{total} scores...")
@@ -245,12 +257,18 @@ class WalkScoreCalculator:
         print(f"Computed {len(scores)} baseline WalkScores")
         
         if save_to_db:
-            self._save_scores_to_db(scores, scenario='baseline')
+            self._save_scores_to_db(scores, weighted_distances, scenario='baseline')
         
         return scores
     
-    def _save_scores_to_db(self, scores: Dict[int, float], scenario: str = 'baseline'):
-        """Save WalkScores to database."""
+    def _save_scores_to_db(self, scores: Dict[int, float], 
+                          weighted_distances: Dict[int, float],
+                          scenario: str = 'baseline'):
+        """
+        Save WalkScores to database.
+        
+        ✅ OPTIMIZED: Uses pre-computed weighted distances instead of recalculating.
+        """
         print(f"Saving {scenario} scores to database...")
         
         with self.db.get_session() as session:
@@ -261,11 +279,9 @@ class WalkScoreCalculator:
                 end = min(start + batch_size, len(residential_ids))
                 batch_ids = residential_ids[start:end]
                 
-                # Load distances only for this batch
-                self.path_calculator.load_batch_for_residential(batch_ids)
-                
                 for res_id in batch_ids:
-                    weighted_dist = self.compute_weighted_distance(res_id)
+                    # Use pre-computed values (no recalculation!)
+                    weighted_dist = weighted_distances.get(res_id, 0.0)
                     score = scores[res_id]
                     
                     query = """

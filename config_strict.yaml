@@ -1,0 +1,74 @@
+# STRICT CONFIGURATION (Toronto-style)
+# Only major amenities for realistic WalkScore
+
+amenities:
+  grocery:
+    weight: 1.0
+    category: plain
+    
+  school:
+    weight: 0.8
+    category: plain
+    
+  restaurant:
+    weight: 0.6
+    category: depth
+    depth_count: 10
+    
+  healthcare:
+    weight: 0.9
+    category: plain
+
+# STRICT OSM TAGS (Toronto-style filtering)
+amenity_tags:
+  grocery:
+    # ONLY major supermarkets (50m² and above)
+    - shop: supermarket
+    # Explicit major chains
+    - name: Migros
+    - name: CarrefourSA
+    - name: Kipa
+    - name: Macro
+    - name: Real
+    - name: Metro
+    # Note: Small bakkal, kiosk, convenience EXCLUDED
+    
+  school:
+    # ONLY primary/secondary schools (NO tutoring!)
+    - amenity: school
+    - amenity: kindergarten
+    - amenity: college
+    - amenity: university
+    # Note: Dershane, kurs, music school EXCLUDED
+    
+  restaurant:
+    # Full-service restaurants + fast food chains
+    - amenity: restaurant
+    - amenity: fast_food
+    - amenity: cafe
+    # Note: Small tea houses, kiosks EXCLUDED
+    
+  healthcare:
+    # ONLY hospitals and major clinics
+    - amenity: hospital
+    - amenity: clinic
+    - amenity: doctors
+    # Note: Small muayenehaneler may be excluded
+
+# SIZE/CAPACITY FILTERS (optional - for future)
+filters:
+  grocery:
+    min_floor_area_m2: 50  # Minimum 50m² store
+    exclude_names:
+      - "büfe"
+      - "bakkal"
+      - "market"  # Generic "market" often too small
+  
+  school:
+    exclude_types:
+      - "dershane"
+      - "kurs"
+      - "etüt"
+      - "language_school"
+      - "driving_school"
+

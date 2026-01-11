@@ -44,7 +44,7 @@ CREATE INDEX idx_edges_way ON edges(osm_way_id);
 -- Each residential building is unique, but they may share pathfinding nodes
 CREATE TABLE residential_locations (
     residential_id BIGSERIAL PRIMARY KEY,
-    node_id BIGINT NOT NULL REFERENCES nodes(node_id) ON DELETE CASCADE,
+    node_id BIGINT NOT NULL,  -- Just an identifier, NOT a foreign key to nodes!
     snapped_node_id BIGINT REFERENCES nodes(node_id) ON DELETE SET NULL,  -- Network node for pathfinding
     osm_building_id BIGINT UNIQUE,  -- Original OSM building ID for uniqueness
     original_latitude DECIMAL(10, 8),  -- Original building centroid lat
@@ -61,7 +61,7 @@ CREATE INDEX idx_residential_snapped_node ON residential_locations(snapped_node_
 -- e.g., parking lots, empty lots, underused spaces
 CREATE TABLE candidate_locations (
     candidate_id BIGSERIAL PRIMARY KEY,
-    node_id BIGINT NOT NULL UNIQUE REFERENCES nodes(node_id) ON DELETE CASCADE,
+    node_id BIGINT NOT NULL UNIQUE,  -- Just an identifier, NOT a foreign key to nodes!
     snapped_node_id BIGINT REFERENCES nodes(node_id) ON DELETE SET NULL,  -- Network node for pathfinding
     original_latitude DECIMAL(10, 8),  -- Original candidate lat
     original_longitude DECIMAL(11, 8), -- Original candidate lon
@@ -116,7 +116,7 @@ FROM amenity_types WHERE type_name = 'restaurant';
 -- NOTE: Multiple amenities can map to the same network node (snap point)
 CREATE TABLE existing_amenities (
     amenity_id BIGSERIAL PRIMARY KEY,
-    node_id BIGINT NOT NULL REFERENCES nodes(node_id) ON DELETE CASCADE,
+    node_id BIGINT NOT NULL,  -- Just an identifier, NOT a foreign key to nodes!
     snapped_node_id BIGINT REFERENCES nodes(node_id) ON DELETE SET NULL,  -- Network node for pathfinding
     amenity_type_id INTEGER NOT NULL REFERENCES amenity_types(amenity_type_id),
     name TEXT,
@@ -150,7 +150,7 @@ CREATE INDEX idx_shortest_paths_distance ON shortest_paths(distance_meters);
 -- Walkability scores table: Computed WalkScores for residential locations
 CREATE TABLE walkability_scores (
     score_id BIGSERIAL PRIMARY KEY,
-    residential_id BIGINT NOT NULL REFERENCES nodes(node_id) ON DELETE CASCADE,
+    residential_id BIGINT NOT NULL REFERENCES residential_locations(residential_id) ON DELETE CASCADE,  -- FIXED: Reference to residential_locations!
     scenario VARCHAR(50) NOT NULL, -- 'baseline', 'optimized_milp', 'optimized_greedy', etc.
     weighted_distance DECIMAL(10, 2) NOT NULL, -- li: weighted walking distance
     walkscore DECIMAL(5, 2) NOT NULL CHECK (walkscore >= 0 AND walkscore <= 100), -- fi: WalkScore

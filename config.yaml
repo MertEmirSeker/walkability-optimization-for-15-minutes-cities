@@ -51,6 +51,9 @@ amenities:
     weight: 0.6
     category: depth  # Multiple choices
     depth_count: 10  # Top 10 nearest restaurants
+  healthcare:
+    weight: 0.9
+    category: plain  # Single nearest healthcare facility
 
 # Depth Weights for restaurants (example distribution)
 depth_weights:
@@ -191,267 +194,44 @@ osm:
     # GROCERY - Market, Bakkal, Süpermarket, Manav (Food & Grocery Shopping)
     # ============================================================================
     grocery:
-      # Primary supermarkets and grocery stores
-      - shop: supermarket          # Büyük süpermarket (Migros, Şok, BİM, A101)
-      - shop: convenience          # Bakkal, küçük market, esnaf
-      - shop: grocery              # Genel market, bakkal
-      - shop: general              # Genel mağaza (gıda satabilir)
-      - shop: food                 # Gıda mağazası
-      - shop: greengrocer          # Manav, sebze meyve
-      - shop: butcher              # Kasap, et
-      - shop: seafood              # Balıkçı
-      - shop: cheese               # Peynirci
-      - shop: dairy                # Süt ürünleri, mandıra
-      - shop: bakery               # Fırın, ekmek
-      - shop: pastry               # Pastane
-      - shop: confectionery        # Şekerci
-      - shop: chocolate            # Çikolata dükkanı
-      - shop: spices               # Baharat, aktariye
-      - shop: tea                  # Çaycı
-      - shop: coffee               # Kahveci
-      - shop: frozen_food          # Dondurulmuş gıda
-      - shop: organic              # Organik gıda
-      - shop: farm                 # Çiftlik ürünleri
-      - shop: deli                 # Şarküteri
-      - shop: pasta                # Makarna dükkanı
-      - shop: herbs                # Şifalı bitkiler, aktariye
-      - shop: health_food          # Sağlıklı gıda
-      - shop: beverages            # İçecek satışı, meşrubat
-      - shop: water                # Su bayii
-      - shop: alcohol              # İçki, tekel
-      - shop: wine                 # Şarap satışı
-      - shop: kiosk                # Büfe, gazete büfesi
-      # Department stores and malls (may include grocery)
-      - shop: department_store     # Büyük mağaza
-      - shop: mall                 # AVM
-      - shop: wholesale            # Toptancı, hal
-      # Turkish specific - EXPANDED
-      - shop: marketplace          # Pazar yeri
-      - shop: market               # Market
-      - amenity: marketplace       # Halk pazarı, semt pazarı
-      # Additional Turkish food shops
-      - shop: nuts                 # Kuruyemişçi
-      - shop: honey                # Balcı
-      - shop: dried_fruit          # Kuru meyve
-      - shop: rice                 # Pirinç, bakliyat
-      - shop: trade                # Ticaret (bazen market anlamında)
-      - shop: variety_store        # Çeşitli ürünler (bakkaliye içerebilir)
-      - shop: minimarket           # Minimarket (Türkçe tag, informal)
-      # ULTRA COMPREHENSIVE - Every possible food-related tag
-      - shop: doityourself         # İnşaat/hırdavat (bazen gıda da satar)
-      - shop: hardware             # Hırdavat (bazen gıda satar)
-      - shop: local_shop           # Yerel dükkan
-      - shop: country_store        # Köy marketi
-      - shop: deli                 # Deli, şarküteri
-      - shop: eggs                 # Yumurta satışı
-      - shop: fish                 # Balık
-      - shop: fruit                # Meyve
-      - shop: vegetables           # Sebze
-      - shop: fruit_and_veg        # Meyve sebze
-      - shop: produce              # Ürün satışı
-      - shop: Asian                # Asya marketi
-      - shop: organic              # Organik
-      - shop: milk                 # Süt bayii
-      - shop: delicatessen         # Gurme
-      - shop: convenience_store    # Convenience (uzun versiyon)
-      - shop: corner_shop          # Köşe bakkal
-      - shop: newsagent            # Gazete bayii (bazen gıda satar)
-      - shop: yes                  # Tanımsız mağaza (gıda olabilir)
-      - amenity: vending_machine   # Otomat (gıda satabilir)
-      - amenity: fast_food         # Fast food (gıda sayılabilir)
+      # STRICT - ONLY major supermarkets (Toronto-style)
+      - shop: supermarket          # Büyük süpermarket ONLY (Migros, Şok ≥50m², BİM, A101, Carrefour)
+      # Note: Small bakkal, kiosk, bakery, greengrocer EXCLUDED for realistic WalkScore
     
     # ============================================================================
     # RESTAURANT - Restoran, Kafe, Lokanta, Yemek (Dining & Food Services)
     # ============================================================================
     restaurant:
-      # Primary dining
-      - amenity: restaurant        # Restoran
+      # STRICT - ONLY major dining establishments (Toronto-style)
+      - amenity: restaurant        # Restoran (sit-down meals)
       - amenity: fast_food         # Fast food
       - amenity: cafe              # Kafe
-      - amenity: food_court        # Yemek alanı (AVM)
-      - amenity: canteen           # Kantin
-      - amenity: cafeteria         # Kafeterya
-      # Beverages and desserts
-      - amenity: ice_cream         # Dondurma
-      - amenity: juice_bar         # Meyve suyu barı
-      # Social dining
-      - amenity: pub               # Pub
-      - amenity: bar               # Bar
-      - amenity: biergarten        # Bira bahçesi
-      - amenity: bbq               # Mangal/barbekü
-      # Specific cuisine types (OSM allows cuisine tag)
-      - amenity: pizza             # Pizzacı (nadiren bu şekilde tag'lenir)
-      - amenity: kebab             # Kebapçı (nadiren)
-      # Turkish specific - EXPANDED
-      - shop: bakery               # Fırın (bazen yemek de satar)
-      - shop: pastry               # Pastane (tatlı)
-      - shop: tea                  # Çay ocağı, çaycı
-      - shop: coffee               # Kahvehane
-      # Street food
-      - amenity: street_food       # Sokak yemeği
-      # Generic food point
-      - amenity: food              # Genel yemek noktası
-      # Additional Turkish food culture
-      - amenity: kiosk             # Büfe (yemek satan)
-      - shop: doner                # Dönerci
-      - shop: kebab                # Kebapçı
-      - shop: restaurant           # Restoran (shop tag'i ile)
-      # Teahouses and traditional cafes
-      - amenity: teahouse          # Çayhane
-      - amenity: coffeehouse       # Kahvehane
-      # ULTRA COMPREHENSIVE - Every possible dining tag
-      - amenity: nightclub         # Gece kulübü (yemek servis edebilir)
-      - amenity: casino            # Kumarhane (yemek olabilir)
-      - amenity: social_club       # Sosyal kulüp
-      - amenity: community_centre  # Toplum merkezi (kantin olabilir)
-      - amenity: gambling          # Kumar (yemek servis edebilir)
-      - amenity: lounge            # Lounge
-      - amenity: internet_cafe     # İnternet kafe (yemek servis edebilir)
-      - amenity: hookah_lounge     # Nargile kafe
-      - amenity: smoking_area      # Sigara alanı (kafe olabilir)
-      - shop: beverages            # İçecek satışı (cafe sayılabilir)
-      - shop: confectionery        # Şekerci (cafe olabilir)
-      - shop: chocolate            # Çikolata (cafe olabilir)
-      - shop: ice_cream            # Dondurma
-      - shop: sweets               # Tatlı
-      - shop: candy                # Şeker
-      - shop: dessert              # Tatlı
-      - shop: juice                # Meyve suyu
-      - shop: smoothie             # Smoothie
-      - shop: bubble_tea           # Bubble tea
-      - tourism: hotel             # Otel (restoran olabilir)
-      - tourism: motel             # Motel (yemek servis edebilir)
-      - tourism: guest_house       # Pansiyon (yemek olabilir)
-      - tourism: hostel            # Hostel (mutfak/yemek olabilir)
+      - amenity: food_court        # Yemek alanı (AVM food courts)
+      # Note: Bars, pubs, ice cream shops, juice bars, teahouses EXCLUDED for realistic WalkScore
     
     # ============================================================================
     # SCHOOL - Okul, Kreş, Üniversite (Education & Childcare)
     # ============================================================================
     school:
-      # Primary and secondary education
-      - amenity: school            # İlkokul, ortaokul, lise
+      # STRICT - ONLY primary, secondary, and higher education (Toronto-style)
+      - amenity: school            # İlkokul, ortaokul, lise ONLY
       - amenity: kindergarten      # Anaokulu, kreş
       - amenity: college           # Kolej, yüksekokul
       - amenity: university        # Üniversite
-      # Specialized education
-      - amenity: language_school   # Dil okulu
-      - amenity: music_school      # Müzik okulu
-      - amenity: driving_school    # Sürücü kursu
-      - amenity: training          # Eğitim merkezi
-      - amenity: prep_school       # Hazırlık okulu
-      - amenity: tutoring          # Dershane, etüt
-      # Childcare
-      - amenity: childcare         # Çocuk bakımevi
-      - amenity: nursery           # Kreş
-      - amenity: preschool         # Anaokulu
-      # Research and learning
-      - amenity: library           # Kütüphane (eğitim kaynağı)
-      - amenity: research_institute # Araştırma enstitüsü
-      # Building tags that might be schools
-      - building: school           # Okul binası
-      - building: kindergarten     # Anaokulu binası
-      - building: college          # Kolej binası
-      - building: university       # Üniversite binası
-      # Landuse tags
-      - landuse: education         # Eğitim alanı
-      # Turkish specific (informal tags)
-      - amenity: dershane          # Dershane (Türkçe)
-      - amenity: kurs              # Kurs merkezi (Türkçe)
-      # ULTRA COMPREHENSIVE - Every possible education tag
-      - amenity: cram_school       # Dershane
-      - amenity: music_venue       # Müzik mekânı (eğitim olabilir)
-      - amenity: arts_centre       # Sanat merkezi (eğitim)
-      - amenity: studio            # Stüdyo (eğitim)
-      - amenity: dancing_school    # Dans okulu
-      - amenity: dive_centre       # Dalış merkezi (eğitim)
-      - amenity: training_centre   # Eğitim merkezi
-      - amenity: conference_centre # Konferans merkezi (eğitim)
-      - amenity: education         # Genel eğitim
-      - amenity: learning_centre   # Öğrenim merkezi
-      - amenity: public_bookcase   # Kütüphane dolabı
-      - leisure: sports_centre     # Spor merkezi (eğitim verebilir)
-      - leisure: fitness_centre    # Fitness (eğitim)
-      - leisure: dance             # Dans (eğitim)
-      - leisure: hackerspace       # Hackerspace (eğitim)
-      - office: educational_institution # Eğitim kurumu ofisi
-      - shop: books                # Kitapçı (eğitimle ilişkili)
-      - shop: stationery           # Kırtasiye (eğitimle ilişkili)
+      # Note: Dershane, language schools, music schools, tutoring, libraries EXCLUDED for realistic WalkScore
     
     # ============================================================================
     # HEALTHCARE - Sağlık, Hastane, Eczane, Doktor (Health & Medical Services)
     # ============================================================================
     healthcare:
-      # Primary healthcare facilities
-      - amenity: hospital          # Hastane
-      - amenity: clinic            # Klinik, poliklinik
-      - amenity: doctors           # Doktor muayenehanesi
-      - amenity: doctor            # Doktor (tekil)
-      - amenity: dentist           # Diş hekimi
-      - amenity: pharmacy          # Eczane
-      - amenity: veterinary        # Veteriner
-      # Specialized healthcare
-      - amenity: healthcare        # Genel sağlık hizmeti
-      - amenity: nursing_home      # Huzurevi, bakımevi
-      - amenity: social_facility   # Sosyal tesis (sağlık barındırabilir)
-      - amenity: health_post       # Sağlık ocağı
-      - amenity: maternity         # Doğum evi
-      - amenity: physiotherapy     # Fizyoterapi
-      - amenity: psychotherapist   # Psikoterapist
-      - amenity: optician          # Gözlükçü (sağlık hizmeti)
-      - amenity: hearing_aids      # İşitme cihazları
-      - amenity: laboratory        # Tıbbi laboratuvar
-      - amenity: blood_bank        # Kan bankası
-      # Healthcare using healthcare tag
-      - healthcare: hospital       # Hastane
-      - healthcare: clinic         # Klinik
-      - healthcare: doctor         # Doktor
-      - healthcare: dentist        # Diş hekimi
-      - healthcare: pharmacy       # Eczane
-      - healthcare: laboratory     # Laboratuvar
-      - healthcare: physiotherapist # Fizyoterapist
-      - healthcare: alternative    # Alternatif tıp
-      - healthcare: centre         # Sağlık merkezi
-      # Building tags
-      - building: hospital         # Hastane binası
-      - building: clinic           # Klinik binası
-      - building: healthcare       # Sağlık binası
-      # Turkish specific
-      - amenity: saglik_ocagi      # Sağlık ocağı (Türkçe)
-      - amenity: aile_sagligi      # Aile sağlığı merkezi (Türkçe)
-      # ULTRA COMPREHENSIVE - Every possible healthcare tag
-      - healthcare: blood_donation # Kan bağışı
-      - healthcare: nurse          # Hemşire
-      - healthcare: midwife        # Ebe
-      - healthcare: podiatrist     # Ayak doktoru
-      - healthcare: psychologist   # Psikolog
-      - healthcare: occupational_therapist # İş terapisti
-      - healthcare: speech_therapist # Konuşma terapisti
-      - healthcare: optometrist    # Optometrist
-      - healthcare: dialysis       # Diyaliz
-      - healthcare: rehabilitation # Rehabilitasyon
-      - healthcare: counselling    # Danışmanlık
-      - healthcare: hospice        # Bakımevi
-      - healthcare: birthing_center # Doğum merkezi
-      - healthcare: sample_collection # Numune alma
-      - healthcare: blood_bank     # Kan bankası
-      - healthcare: emergency_service # Acil servis
-      - amenity: social_centre     # Sosyal merkez (sağlık içerebilir)
-      - amenity: retirement_home   # Yaşlı evi
-      - amenity: ambulance_station # Ambulans istasyonu
-      - amenity: chiropractor      # Kiropraktör
-      - amenity: massage           # Masaj (sağlık)
-      - amenity: acupuncture       # Akupunktur
-      - amenity: herbalist         # Aktariye (sağlık)
-      - office: therapist          # Terapist ofisi
-      - office: physician          # Hekim ofisi
-      - shop: medical_supply       # Tıbbi malzeme
-      - shop: optician             # Optik
-      - shop: hearing_aids         # İşitme cihazı
-      - shop: chemist              # Eczane (İngiliz İngilizcesi)
-      - shop: perfumery            # Parfümeri (bazen eczane işlevi)
-      - shop: health               # Sağlık mağazası
-      - shop: herbalist            # Aktariye
-      - shop: nutrition_supplements # Takviye gıda
+      # STRICT - ONLY major healthcare facilities (Toronto-style)
+      - amenity: hospital          # Hastane ONLY (major hospitals)
+      - amenity: clinic            # Klinik, poliklinik (major clinics)
+      - amenity: doctors           # Doktor muayenehanesi (doctors' offices)
+      - amenity: pharmacy          # Eczane (pharmacies)
+      - healthcare: hospital       # Hastane (healthcare tag)
+      - healthcare: clinic         # Klinik (healthcare tag)
+      # Note: Opticians, massage, herbalists, therapists, veterinary EXCLUDED for realistic WalkScore
   
   # Tags for candidate locations (ULTRA COMPREHENSIVE)
   # These are potential locations where new amenities can be placed

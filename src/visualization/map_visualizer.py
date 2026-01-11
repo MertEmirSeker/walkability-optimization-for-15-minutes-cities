@@ -60,7 +60,7 @@ class MapVisualizer:
                        COALESCE(rl.original_latitude, n.latitude) AS lat,
                        COALESCE(rl.original_longitude, n.longitude) AS lon
                 FROM residential_locations rl
-                JOIN nodes n ON n.node_id = rl.node_id
+                JOIN nodes n ON n.node_id = rl.snapped_node_id
                 ORDER BY rl.residential_id
             """
             if max_points is not None:
@@ -201,26 +201,29 @@ class MapVisualizer:
             for amenity_type, node_ids in solution.items():
                 color = amenity_colors.get(amenity_type, self.colors['allocated_amenity'])
                 
-                for node_id in node_ids:
+                # CRITICAL: solution contains snapped_node_id, not node_id
+                for snapped_node_id in node_ids:
                     # Get original coordinates from candidate_locations
                     query = """
                         SELECT COALESCE(cl.original_latitude, n.latitude) AS lat,
                                COALESCE(cl.original_longitude, n.longitude) AS lon
                         FROM candidate_locations cl
-                        JOIN nodes n ON n.node_id = cl.node_id
-                        WHERE cl.node_id = :node_id
+                        JOIN nodes n ON n.node_id = cl.snapped_node_id
+                        WHERE cl.snapped_node_id = :snapped_node_id
                     """
-                    result = session.execute(text(query), {'node_id': node_id})
+                    result = session.execute(text(query), {'snapped_node_id': snapped_node_id})
                     row = result.first()
                     
+                    lat, lon = None, None
                     if row:
                         lat, lon = row
-                        if lat and lon:
-                            folium.Marker(
-                                location=[float(lat), float(lon)],
-                                popup=f"Allocated {amenity_type} ({scenario})",
-                                icon=folium.Icon(color='red', icon='star', prefix='fa')
-                            ).add_to(m)
+                    
+                    if lat and lon:
+                        folium.Marker(
+                            location=[float(lat), float(lon)],
+                            popup=f"Allocated {amenity_type} ({scenario})",
+                            icon=folium.Icon(color='red', icon='star', prefix='fa')
+                        ).add_to(m)
         
         print("Added allocated amenities")
     
@@ -249,21 +252,18 @@ class MapVisualizer:
         print(f"Added {len(candidate_coords)} candidate locations")
     
     def add_walkscore_heatmap(self, m: folium.Map, scenario: str = 'baseline'):
-        """Add WalkScore heatmap to map.
-        
-        Uses original building coordinates (not snapped network nodes) for visualization.
-        """
+        """Add WalkScore heatmap layer to map."""
         print(f"Adding WalkScore heatmap ({scenario})...")
         
-        # Load WalkScores from database (use original coordinates for display)
+        # Load WalkScores from database
         with self.db.get_session() as session:
             query = """
                 SELECT ws.residential_id, ws.walkscore,
                        COALESCE(rl.original_latitude, n.latitude) AS lat,
                        COALESCE(rl.original_longitude, n.longitude) AS lon
                 FROM walkability_scores ws
-                JOIN residential_locations rl ON ws.residential_id = rl.residential_id
-                JOIN nodes n ON n.node_id = rl.node_id
+                JOIN nodes n ON ws.residential_id = n.node_id
+                LEFT JOIN residential_locations rl ON rl.snapped_node_id = n.node_id
                 WHERE ws.scenario = :scenario
             """
             result = session.execute(text(query), {'scenario': scenario})
@@ -272,27 +272,79 @@ class MapVisualizer:
             for row in result:
                 residential_id, score, lat, lon = row
                 if lat and lon:
-                    # Weight by WalkScore
-                    heat_data.append([float(lat), float(lon), float(score)])
+                    # Weight by WalkScore (0-100 scale, normalize to 0-1)
+                    heat_data.append([float(lat), float(lon), float(score)/100.0])
         
         if heat_data:
-            # Create heatmap
+            # Create heatmap with gradient
             plugins.HeatMap(
                 heat_data,
-                min_opacity=0.2,
+                min_opacity=0.3,
                 max_zoom=18,
                 radius=15,
-                blur=10,
+                blur=20,
                 gradient={
                     0.0: 'blue',
-                    0.3: 'cyan',
+                    0.3: 'cyan', 
                     0.5: 'lime',
                     0.7: 'yellow',
                     1.0: 'red'
                 }
             ).add_to(m)
+            print(f"Added heatmap with {len(heat_data)} points")
+        else:
+            print(f"No scores found for scenario: {scenario}")
+    
+    def add_residential_markers(self, m, scores: Dict[int, float]):
+        """
+        Add residential locations to map, colored by WalkScore.
         
-        print(f"Added heatmap with {len(heat_data)} points")
+        Args:
+            m: Folium map object
+            scores: Dict mapping residential_id -> WalkScore
+        """
+        print("Adding residential markers to map...")
+        
+        # Color scale function
+        def get_color(score):
+            if score >= 90: return "#2ecc71"  # Emerald
+            if score >= 70: return "#f1c40f"  # Sunflower
+            if score >= 50: return "#e67e22"  # Carrot
+            return "#e74c3c"  # Alizarin
+        
+        # Add markers
+        count = 0
+        for residential_id, score in scores.items():
+            # Get coordinates
+            # optimization: look up from graph nodes if possible, or query db
+            # For speed, let's assume we can get coords from graph.N nodes?
+            # graph.residential_buildings has (res_id, snapped_id)
+            
+            # Find the snapped node ID first
+            snapped_id = None
+            for rid, sid in self.graph.residential_buildings:
+                if rid == residential_id:
+                    snapped_id = sid
+                    break
+            
+            if snapped_id:
+                lat, lon = self.graph.get_node_coordinates(snapped_id)
+                if lat and lon:
+                    color = get_color(score)
+                    
+                    folium.CircleMarker(
+                        location=[lat, lon],
+                        radius=3,
+                        color=color,
+                        fill=True,
+                        fill_color=color,
+                        fill_opacity=0.7,
+                        popup=f"Score: {score:.1f}",
+                        weight=0
+                    ).add_to(m)
+                    count += 1
+                    
+        print(f"Added {count} residential markers")
     
     def add_fifteen_minute_circles(self, m: folium.Map, 
                                    solution: Dict[str, Set[int]]):
@@ -324,10 +376,9 @@ class MapVisualizer:
         
         m = self.create_base_map()
         self.add_all_buildings(m)  # Add all buildings as background
-        self.add_residential_locations(m)
+        self.add_residential_locations(m)  # Blue dots for residentials
         self.add_existing_amenities(m)
         self.add_candidate_locations(m)
-        self.add_walkscore_heatmap(m, scenario='baseline')
         
         # Save map
         import os
@@ -345,10 +396,9 @@ class MapVisualizer:
         
         m = self.create_base_map()
         self.add_all_buildings(m)  # Add all buildings as background
-        self.add_residential_locations(m)
+        self.add_residential_locations(m)  # Blue dots
         self.add_existing_amenities(m)
         self.add_allocated_amenities(m, solution, scenario)
-        self.add_walkscore_heatmap(m, scenario=scenario)
         self.add_fifteen_minute_circles(m, solution)
         
         # Add legend
@@ -359,6 +409,44 @@ class MapVisualizer:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         m.save(output_path)
         print(f"Optimized map saved to {output_path}")
+        
+        return m
+    
+    def create_baseline_heatmap(self, output_path: str = "visualizations/baseline_heatmap.html"):
+        """Create HEATMAP-ONLY baseline map."""
+        print("Creating baseline heatmap...")
+        
+        m = self.create_base_map()
+        self.add_all_buildings(m, max_points=10000)  # Background
+        self.add_existing_amenities(m)
+        self.add_walkscore_heatmap(m, scenario='baseline')
+        
+        # Save
+        import os
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        m.save(output_path)
+        print(f"Baseline heatmap saved to {output_path}")
+        
+        return m
+    
+    def create_optimized_heatmap(self, solution: Dict[str, Set[int]],
+                                 scenario: str = "optimized",
+                                 output_path: str = "visualizations/optimized_heatmap.html"):
+        """Create HEATMAP-ONLY optimized map."""
+        print(f"Creating optimized heatmap ({scenario})...")
+        
+        m = self.create_base_map()
+        self.add_all_buildings(m, max_points=10000)  # Background
+        self.add_existing_amenities(m)
+        self.add_allocated_amenities(m, solution, scenario)
+        self.add_walkscore_heatmap(m, scenario=scenario)
+        self.add_fifteen_minute_circles(m, solution)
+        
+        # Save
+        import os
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        m.save(output_path)
+        print(f"Optimized heatmap saved to {output_path}")
         
         return m
     

@@ -46,18 +46,18 @@ class OSMDataLoader:
     MAX_SNAPPING_DISTANCE = 500  # Default, will be overridden by config
     DUPLICATE_THRESHOLD = 1.0
     AMENITY_DUPLICATE_THRESHOLD = 5.0
-
+    
     def __init__(self, config_path: str = "config.yaml"):
         """Initialize OSM loader with configuration."""
         with open(config_path, 'r', encoding='utf-8') as f:
             self.config = yaml.safe_load(f)
-
+        
         self.balikesir_config = self.config['balikesir']
         self.osm_config = self.config['osm']
         self.db = get_db_manager(config_path)
         # center polygon (Karesi + Altıeylül)
         self.center_poly = get_balikesir_center_polygon()
-
+        
         # For amenities, use a MUCH larger polygon (1.5km buffer)
         # to capture amenities just outside the center that serve residents
         # Many amenities are located just outside official boundaries
@@ -112,7 +112,7 @@ class OSMDataLoader:
 
         logger.info(
             f"Loaded {len(self.RESIDENTIAL_BUILDING_TYPES)} residential building types from config")
-
+        
     def get_boundary(self) -> Tuple[float, float, float, float]:
         """Get Balıkesir city center boundary coordinates (for visualization only)."""
         boundary = self.balikesir_config['boundary']
@@ -122,7 +122,7 @@ class OSMDataLoader:
             boundary['east'],
             boundary['west'],
         )
-
+    
     def load_pedestrian_network(self) -> ox.graph:
         """
         Load pedestrian network for Balıkesir city center polygon.
@@ -188,7 +188,7 @@ class OSMDataLoader:
         logger.info(
             f"Loaded pedestrian network: {len(G.nodes)} nodes, {len(G.edges)} edges")
         return G
-
+    
     def load_residential_locations(self) -> pd.DataFrame:
         """
         Load residential buildings/addresses from OSM with enhanced filtering.
@@ -284,7 +284,7 @@ class OSMDataLoader:
                 mask = pd.Series([True] * len(gdf), index=gdf.index)
 
                 # Exclude by building type
-                if bcol is not None:
+            if bcol is not None:
                     mask &= ~bcol.isin(non_residential_types)
 
                 # Exclude by amenity tag - IMPORTANT!
@@ -295,8 +295,7 @@ class OSMDataLoader:
                 gdf = gdf[mask].copy()
                 filtered_out = before_filter - len(gdf)
                 logger.info(
-    f"After building type filter: {
-        len(gdf)} buildings (excluded {filtered_out} non-residential)")
+                    f"After building type filter: {len(gdf)} buildings (excluded {filtered_out} non-residential)")
 
             # Also check landuse=residential tags
             landuse_col = gdf.get("landuse")
@@ -337,7 +336,7 @@ class OSMDataLoader:
     f"Error loading residential locations: {e}",
      exc_info=True)
             return pd.DataFrame()
-
+    
     def _validate_coordinates(self, gdf: pd.DataFrame) -> pd.DataFrame:
         """Validate that coordinates are within expected bounds."""
         if len(gdf) == 0:
@@ -388,7 +387,7 @@ class OSMDataLoader:
     f"Removed {duplicates_removed} exact duplicate locations")
 
         return gdf_dedup
-
+    
     def load_amenities(self, amenity_type: str) -> pd.DataFrame:
         """
         Load specific amenity type from OSM with comprehensive tag coverage.
@@ -446,11 +445,13 @@ class OSMDataLoader:
     f"Error loading {amenity_type} amenities: {e}",
      exc_info=True)
             return pd.DataFrame()
-
+    
     def _get_amenity_tags_from_config(self, amenity_type: str) -> Dict:
         """
         Extract amenity tags from config for a specific amenity type.
         Converts config list format to OSMnx-compatible dict format.
+        
+        IMPORTANT: Converts boolean True to "yes" for OSM compatibility.
         """
         amenity_tags = self.osm_config.get('amenity_tags', {})
         if amenity_type not in amenity_tags:
@@ -466,13 +467,30 @@ class OSMDataLoader:
             for key, value in tag_dict.items():
                 if key not in osm_tags:
                     osm_tags[key] = []
+                    
+                # Convert boolean True to "yes" for OSM compatibility
+                # OSMnx requires strings, not booleans
+                if value is True:
+                    value = "yes"
+                elif value is False:
+                    continue  # Skip False values
+                    
                 if isinstance(value, list):
-                    osm_tags[key].extend(value)
+                    # Convert any True/False in list to strings
+                    converted_list = []
+                    for v in value:
+                        if v is True:
+                            converted_list.append("yes")
+                        elif v is False:
+                            continue  # Skip False
+                        else:
+                            converted_list.append(str(v))
+                    osm_tags[key].extend(converted_list)
                 else:
-                    osm_tags[key].append(value)
+                    osm_tags[key].append(str(value))
 
         return osm_tags
-
+    
     def load_candidate_locations(self) -> pd.DataFrame:
         """
         Load candidate locations (parking lots, empty lots, etc.) from OSM.
@@ -503,18 +521,16 @@ class OSMDataLoader:
 
                 if len(gdf) > 0:
                     all_gdfs.append(gdf)
-                    logger.info(
-    f"Found {
-        len(gdf)} candidates for tags: {tags}")
+                    logger.info(f"Found {len(gdf)} candidates for tags: {tags}")
 
-            except Exception as e:
+        except Exception as e:
                 logger.debug(f"No candidates found for tags {tags}: {e}")
                 continue
 
         if not all_gdfs:
             logger.warning("No candidate locations found")
             return pd.DataFrame()
-
+    
         # Combine all candidate dataframes
         gdf = pd.concat(all_gdfs, ignore_index=True)
 
@@ -567,7 +583,7 @@ class OSMDataLoader:
                 result.append({key: values})
 
         return result if result else [{"amenity": "parking"}]  # Fallback
-
+    
     def save_network_to_db(self, G: ox.graph):
         """
         Save pedestrian network graph to database.
@@ -578,74 +594,70 @@ class OSMDataLoader:
         - Progress tracking
         """
         logger.info("Saving network to database...")
-
+        
         nodes_saved = 0
         edges_saved = 0
 
         try:
-            with self.db.get_session() as session:
-                # Insert nodes
-                nodes_data = []
-                for node_id, data in G.nodes(data=True):
-                    lat = data.get('y', 0)
-                    lon = data.get('x', 0)
-
-                    nodes_data.append({
-                        'osm_id': node_id,
-                        'node_type': 'network',
-                        'latitude': lat,
-                        'longitude': lon
-                    })
-
+        with self.db.get_session() as session:
+            # Insert nodes
+            nodes_data = []
+            for node_id, data in G.nodes(data=True):
+                lat = data.get('y', 0)
+                lon = data.get('x', 0)
+                
+                nodes_data.append({
+                    'osm_id': node_id,
+                    'node_type': 'network',
+                    'latitude': lat,
+                    'longitude': lon
+                })
+            
                 # Batch insert nodes
                 logger.info(f"Inserting {len(nodes_data)} nodes...")
-                for node_data in nodes_data:
-                    query = """
-                        INSERT INTO nodes (osm_id, node_type, latitude, longitude, geom)
-                        VALUES (:osm_id, :node_type, :latitude, :longitude,
-                                ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326))
-                        ON CONFLICT (osm_id) DO NOTHING
-                    """
-                    session.execute(text(query), node_data)
+            for node_data in nodes_data:
+                query = """
+                    INSERT INTO nodes (osm_id, node_type, latitude, longitude, geom)
+                    VALUES (:osm_id, :node_type, :latitude, :longitude, 
+                            ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326))
+                    ON CONFLICT (osm_id) DO NOTHING
+                """
+                session.execute(text(query), node_data)
                     nodes_saved += 1
-
-                # Insert edges
-                edges_data = []
-                for u, v, data in G.edges(data=True):
-                    # Ensure plain float (avoid np.float64 showing up in SQL)
-                    raw_length = data.get('length', 0) or 0.0
-                    length = float(raw_length)
-                    edges_data.append({
-                        'from_osm_id': u,
-                        'to_osm_id': v,
-                        'length_meters': length
-                    })
-
-                # Batch insert edges
+            
+            # Insert edges
+            edges_data = []
+            for u, v, data in G.edges(data=True):
+                # Ensure plain float (avoid np.float64 showing up in SQL)
+                raw_length = data.get('length', 0) or 0.0
+                length = float(raw_length)
+                edges_data.append({
+                    'from_osm_id': u,
+                    'to_osm_id': v,
+                    'length_meters': length
+                })
+            
+            # Batch insert edges
                 logger.info(f"Inserting {len(edges_data)} edges...")
                 for edge_data in edges_data:
-                    query = """
-                        INSERT INTO edges (from_node_id, to_node_id, length_meters)
-                        SELECT
-                            (SELECT node_id FROM nodes WHERE osm_id = :from_osm_id),
-                            (SELECT node_id FROM nodes WHERE osm_id = :to_osm_id),
-                            :length_meters
-                        WHERE EXISTS (SELECT 1 FROM nodes WHERE osm_id = :from_osm_id)
-                          AND EXISTS (SELECT 1 FROM nodes WHERE osm_id = :to_osm_id)
-                        ON CONFLICT (from_node_id, to_node_id) DO NOTHING
-                    """
-                    session.execute(text(query), edge_data)
+                query = """
+                    INSERT INTO edges (from_node_id, to_node_id, length_meters)
+                    SELECT 
+                        (SELECT node_id FROM nodes WHERE osm_id = :from_osm_id),
+                        (SELECT node_id FROM nodes WHERE osm_id = :to_osm_id),
+                        :length_meters
+                    WHERE EXISTS (SELECT 1 FROM nodes WHERE osm_id = :from_osm_id)
+                      AND EXISTS (SELECT 1 FROM nodes WHERE osm_id = :to_osm_id)
+                    ON CONFLICT (from_node_id, to_node_id) DO NOTHING
+                """
+                session.execute(text(query), edge_data)
                     edges_saved += 1
 
-                logger.info(
-    f"Network saved: {nodes_saved} nodes, {edges_saved} edges")
+                logger.info(f"Network saved: {nodes_saved} nodes, {edges_saved} edges")
 
         except Exception as e:
-            logger.error(
-    f"Error saving network to database: {e}",
-     exc_info=True)
-            self.stats['data_quality_issues'].append(
-                f"Network save error: {str(e)}")
+            logger.error(f"Error saving network to database: {e}", exc_info=True)
+            self.stats['data_quality_issues'].append(f"Network save error: {str(e)}")
 
     def _get_largest_component_nodes(self) -> set:
         """Get node IDs from the largest connected component of the graph."""
@@ -682,13 +694,18 @@ class OSMDataLoader:
                 return largest
 
     def _find_nearest_network_node(
-    self,
-    lat: float,
-    lon: float,
-     valid_nodes: set) -> int:
-        """Find nearest network node from valid_nodes to given coordinates."""
+            self,
+            lat: float,
+            lon: float,
+            valid_nodes: set) -> int:
+        """
+        Find nearest network node from valid_nodes to given coordinates.
+        
+        ⚡ OPTIMIZED: Uses spatial index, no array transfer!
+        """
         with self.db.get_session() as session:
-            # Use PostGIS to find nearest node
+            # ⚡ Use PostGIS spatial index (KNN operator <->)
+            # No need to send 82K array! Spatial index is FAST!
             query = """
                 SELECT node_id,
                        ST_Distance(
@@ -696,21 +713,20 @@ class OSMDataLoader:
                            ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography
                        ) as distance
                 FROM nodes
-                WHERE node_id = ANY(:valid_nodes)
+                WHERE node_type = 'network'
                 ORDER BY geom <-> ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)
                 LIMIT 1
             """
             result = session.execute(text(query), {
                 'lat': lat,
-                'lon': lon,
-                'valid_nodes': list(valid_nodes)
+                'lon': lon
             })
             row = result.first()
             if row and row[1] <= self.MAX_SNAPPING_DISTANCE:
                 return row[0]
             return None
-
-    def save_locations_to_db(self, gdf: pd.DataFrame, location_type: str,
+    
+    def save_locations_to_db(self, gdf: pd.DataFrame, location_type: str, 
                             amenity_type: str = None):
         """
         Save locations (residential, amenities, candidates) to database.
@@ -724,7 +740,7 @@ class OSMDataLoader:
         logger.info(
     f"Saving {
         len(gdf)} {location_type} locations to database...")
-
+        
         # Get largest component nodes for snapping
         if location_type in ['residential', 'amenity', 'candidate']:
             logger.info("Finding largest connected component for snapping...")
@@ -738,38 +754,41 @@ class OSMDataLoader:
         saved_count = 0
         error_count = 0
         snapped_count = 0
+        
+        total = len(gdf)
+        batch_size = 100  # Commit every 100 records
 
         try:
-            with self.db.get_session() as session:
-                for idx, row in gdf.iterrows():
+        with self.db.get_session() as session:
+                for i, (idx, row) in enumerate(gdf.iterrows(), 1):
                     try:
-                        geom = row.geometry
-                        lat = geom.y
-                        lon = geom.x
+                geom = row.geometry
+                lat = geom.y
+                lon = geom.x
                         
                         # First, get osm_id (needed for amenities)
-                        osm_raw = row.get("osmid", None)
-                        osm_id = None
-                        if osm_raw is not None and not pd.isna(osm_raw):
-                            osm_id = osm_raw
-                        else:
-                            osm_id = idx
+                osm_raw = row.get("osmid", None)
+                osm_id = None
+                if osm_raw is not None and not pd.isna(osm_raw):
+                    osm_id = osm_raw
+                else:
+                    osm_id = idx
 
-                        # Handle cases like ('node', 123456) or [123456]
-                        if isinstance(osm_id, (list, tuple)):
-                            first = osm_id[0]
-                            if isinstance(first, (list, tuple)) and len(first) > 1:
-                                osm_id = first[1]
-                            else:
-                                osm_id = first
+                # Handle cases like ('node', 123456) or [123456]
+                if isinstance(osm_id, (list, tuple)):
+                    first = osm_id[0]
+                    if isinstance(first, (list, tuple)) and len(first) > 1:
+                        osm_id = first[1]
+                    else:
+                        osm_id = first
 
-                        try:
-                            osm_id = int(osm_id)
-                        except Exception:
-                            # Fallback to numeric index if conversion fails
-                            try:
-                                osm_id = int(idx[1]) if isinstance(idx, (list, tuple)) and len(idx) > 1 else int(idx)
-                            except Exception:
+                try:
+                    osm_id = int(osm_id)
+                except Exception:
+                    # Fallback to numeric index if conversion fails
+                    try:
+                        osm_id = int(idx[1]) if isinstance(idx, (list, tuple)) and len(idx) > 1 else int(idx)
+                    except Exception:
                                 error_count += 1
                                 continue
                         
@@ -782,72 +801,58 @@ class OSMDataLoader:
                             else:
                                 # Skip if can't snap
                                 error_count += 1
-                                continue
-                        
-                        # ALWAYS create a unique node for this location (residential/amenity/candidate)
-                        # This node stores the exact building/location coordinates
-                        node_query = """
-                            INSERT INTO nodes (osm_id, node_type, latitude, longitude, geom)
-                            VALUES (:osm_id, :node_type, :latitude, :longitude,
-                                    ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326))
-                            ON CONFLICT (osm_id) DO UPDATE SET
-                                latitude = EXCLUDED.latitude,
-                                longitude = EXCLUDED.longitude
-                            RETURNING node_id
-                        """
-                        result = session.execute(text(node_query), {
-                            'osm_id': osm_id,
-                            'node_type': location_type,
-                            'latitude': lat,
-                            'longitude': lon
-                        })
-                        node_id = result.scalar()
-                        
+                        continue
+                
+                        # FIXED: Don't insert into nodes table!
+                        # node_id is just the osm_id (identifier), not a network node
+                        # Only network nodes belong in the nodes table
+                        node_id = osm_id
+                
                         # Insert into specific table WITH SNAPPED NODE
-                        if location_type == 'residential':
-                            res_query = """
+                if location_type == 'residential':
+                    res_query = """
                                 INSERT INTO residential_locations 
                                     (node_id, snapped_node_id, osm_building_id, address, building_type, original_latitude, original_longitude)
                                 VALUES (:node_id, :snapped_node_id, :osm_building_id, :address, :building_type, :orig_lat, :orig_lon)
                                 ON CONFLICT (osm_building_id) DO NOTHING
-                            """
-                            session.execute(text(res_query), {
-                                'node_id': node_id,
+                    """
+                    session.execute(text(res_query), {
+                        'node_id': node_id,
                                 'snapped_node_id': snapped_node_id,  # For pathfinding
                                 'osm_building_id': osm_id,  # Use OSM building ID for uniqueness
-                                'address': row.get('addr:street', ''),
+                        'address': row.get('addr:street', ''),
                                 'building_type': row.get('building', 'residential'),
                                 'orig_lat': lat,  # Original building coordinate
                                 'orig_lon': lon   # Original building coordinate
-                            })
-                        
-                        elif location_type == 'amenity' and amenity_type:
-                            # Get amenity_type_id
-                            type_query = "SELECT amenity_type_id FROM amenity_types WHERE type_name = :type_name"
-                            type_result = session.execute(text(type_query), {'type_name': amenity_type})
-                            amenity_type_id = type_result.scalar()
-                            
-                            if amenity_type_id:
-                                amenity_query = """
+                    })
+                
+                elif location_type == 'amenity' and amenity_type:
+                    # Get amenity_type_id
+                    type_query = "SELECT amenity_type_id FROM amenity_types WHERE type_name = :type_name"
+                    type_result = session.execute(text(type_query), {'type_name': amenity_type})
+                    amenity_type_id = type_result.scalar()
+                    
+                    if amenity_type_id:
+                        amenity_query = """
                                     INSERT INTO existing_amenities 
                                         (node_id, snapped_node_id, amenity_type_id, name, osm_id, original_latitude, original_longitude)
                                     VALUES (:node_id, :snapped_node_id, :amenity_type_id, :name, :osm_id, :orig_lat, :orig_lon)
                                     ON CONFLICT (osm_id, amenity_type_id) DO NOTHING
-                                """
-                                session.execute(text(amenity_query), {
-                                    'node_id': node_id,
+                        """
+                        session.execute(text(amenity_query), {
+                            'node_id': node_id,
                                     'snapped_node_id': snapped_node_id,  # For pathfinding
-                                    'amenity_type_id': amenity_type_id,
-                                    'name': row.get('name', ''),
+                            'amenity_type_id': amenity_type_id,
+                            'name': row.get('name', ''),
                                     'osm_id': osm_id,
                                     'orig_lat': lat,  # Original amenity coordinate
                                     'orig_lon': lon   # Original amenity coordinate
-                                })
+                        })
                             else:
                                 logger.warning(f"Amenity type '{amenity_type}' not found in database")
-                        
-                        elif location_type == 'candidate':
-                            cand_query = """
+                
+                elif location_type == 'candidate':
+                    cand_query = """
                                 INSERT INTO candidate_locations 
                                     (node_id, snapped_node_id, capacity, location_type, original_latitude, original_longitude)
                                 VALUES (:node_id, :snapped_node_id, :capacity, :location_type, :orig_lat, :orig_lon)
@@ -855,11 +860,11 @@ class OSMDataLoader:
                                     snapped_node_id = EXCLUDED.snapped_node_id,
                                     original_latitude = EXCLUDED.original_latitude,
                                     original_longitude = EXCLUDED.original_longitude
-                            """
-                            session.execute(text(cand_query), {
-                                'node_id': node_id,
+                    """
+                    session.execute(text(cand_query), {
+                        'node_id': node_id,
                                 'snapped_node_id': snapped_node_id,  # For pathfinding
-                                'capacity': 1,  # Default capacity
+                        'capacity': 1,  # Default capacity
                                 'location_type': row.get('amenity', 'parking'),
                                 'orig_lat': lat,  # Original candidate coordinate
                                 'orig_lon': lon   # Original candidate coordinate
@@ -867,17 +872,28 @@ class OSMDataLoader:
                         
                         saved_count += 1
                         
+                        # ⚡ Progress update every 100 records
+                        if i % 100 == 0:
+                            logger.info(f"  Progress: {i}/{total} ({i*100//total}%) - {saved_count} saved, {snapped_count} snapped")
+                        
+                        # ⚡ Commit every batch
+                        if i % batch_size == 0:
+                            session.commit()
+                        
                     except Exception as e:
                         error_count += 1
                         logger.debug(f"Error saving location {idx}: {e}")
                         continue
-            
-            msg = f"Saved {saved_count} {location_type} locations"
-            if snapped_count > 0:
-                msg += f" ({snapped_count} snapped to network)"
-            if error_count > 0:
-                msg += f" ({error_count} errors)"
-            logger.info(msg)
+                
+                # Final commit
+                session.commit()
+                
+                msg = f"Saved {saved_count} {location_type} locations"
+                if snapped_count > 0:
+                    msg += f" ({snapped_count} snapped to network)"
+                if error_count > 0:
+                    msg += f" ({error_count} errors)"
+                logger.info(msg)
             
         except Exception as e:
             logger.error(f"Error saving {location_type} locations: {e}", exc_info=True)

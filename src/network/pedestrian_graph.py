@@ -16,10 +16,13 @@ class PedestrianGraph:
         """Initialize pedestrian graph."""
         self.db = get_db_manager(config_path)
         self.G = None
-        self.N = set()  # Residential locations
-        self.M = set()  # Candidate locations
+        self.N = set()  # NETWORK nodes for residential (unique snapped_node_ids for pathfinding)
+        self.M = set()  # Candidate locations (network nodes)
         self.L = {}     # Existing amenities: {amenity_type: set of node_ids}
         self.node_mapping = {}  # Maps database node_id to graph node_id
+        
+        # ✅ NEW: Track ALL residential buildings (not just unique network nodes)
+        self.residential_buildings = []  # List of (residential_id, snapped_node_id) tuples
         
     def load_from_database(self):
         """Load graph structure from database."""
@@ -80,19 +83,35 @@ class PedestrianGraph:
         print("Loading node sets...")
         
         with self.db.get_session() as session:
-            # Load residential locations (N)
+            # Load residential locations
+            # ✅ FIXED: Load ALL buildings, not just unique network nodes
             residential_query = """
-                SELECT node_id FROM residential_locations
+                SELECT residential_id, snapped_node_id 
+                FROM residential_locations
+                WHERE snapped_node_id IS NOT NULL
             """
             result = session.execute(text(residential_query))
-            self.N = {row[0] for row in result}
-            # Keep only nodes that exist in the (possibly restricted) graph
+            self.residential_buildings = [(row[0], row[1]) for row in result]
+            
+            # For pathfinding, we need unique network nodes
+            self.N = {building[1] for building in self.residential_buildings}
+            # Keep only nodes that exist in the graph
             self.N = {n for n in self.N if n in self.G.nodes}
-            print(f"Loaded {len(self.N)} residential locations (N)")
+            
+            # Filter buildings to only those whose snapped nodes are in the graph
+            self.residential_buildings = [
+                (res_id, snap_id) for res_id, snap_id in self.residential_buildings
+                if snap_id in self.G.nodes
+            ]
+            
+            print(f"Loaded {len(self.residential_buildings)} residential buildings")
+            print(f"Mapped to {len(self.N)} unique network nodes (N)")
             
             # Load candidate locations (M)
+            # CRITICAL: Use snapped_node_id for pathfinding consistency
             candidate_query = """
-                SELECT node_id FROM candidate_locations
+                SELECT DISTINCT snapped_node_id FROM candidate_locations
+                WHERE snapped_node_id IS NOT NULL
             """
             result = session.execute(text(candidate_query))
             self.M = {row[0] for row in result}
@@ -100,10 +119,12 @@ class PedestrianGraph:
             print(f"Loaded {len(self.M)} candidate locations (M)")
             
             # Load existing amenities (L) by type
+            # CRITICAL: Use snapped_node_id for pathfinding consistency
             amenities_query = """
-                SELECT ea.node_id, at.type_name
+                SELECT ea.snapped_node_id, at.type_name
                 FROM existing_amenities ea
                 JOIN amenity_types at ON ea.amenity_type_id = at.amenity_type_id
+                WHERE ea.snapped_node_id IS NOT NULL
             """
             result = session.execute(text(amenities_query))
             

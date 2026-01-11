@@ -14,7 +14,7 @@ from src.network.pedestrian_graph import PedestrianGraph
 from src.network.shortest_paths import ShortestPathCalculator
 from src.scoring.walkscore import WalkScoreCalculator
 from src.algorithms.greedy import GreedyOptimizer
-from src.algorithms.milp_solver import MILPSolver
+from src.algorithms.milp import MILPSolver
 from src.visualization.map_visualizer import MapVisualizer
 from src.evaluation.metrics import MetricsEvaluator
 from src.utils.database import get_db_manager
@@ -119,7 +119,19 @@ def main():
             baseline_scores = scorer.compute_baseline_scores()
             scorer.print_statistics(baseline_scores)
             avg_baseline = scorer.get_average_walkscore(baseline_scores)
-            print(f"Baseline average WalkScore: {avg_baseline:.2f}\n")
+            print(f"Baseline average WalkScore: {avg_baseline:.2f}")
+            
+            # CRITICAL FIX: compute_baseline_scores uses batch loading which CLEARS the distance matrix!
+            # We must reload the full distance matrix for the optimization algorithms to work correctly.
+            print("\n[System] Reloading full distance matrix for optimization...")
+            if not args.skip_distances:
+                 path_calc.load_from_database()
+            else:
+                 # Even if we skipped calculation, we need to load what's in DB
+                 path_calc.load_from_database()
+                 
+            print("✓ Distance matrix restored\n")
+
         except Exception as e:
             print(f"ERROR computing baseline scores: {e}")
             return 1
@@ -162,16 +174,26 @@ def main():
         visualizer = MapVisualizer(graph, scorer)
         
         try:
-            # Baseline map
+            # Baseline maps (both normal and heatmap)
             visualizer.create_baseline_map("visualizations/baseline_map.html")
+            visualizer.create_baseline_heatmap("visualizations/baseline_heatmap.html")
             
-            # Optimized maps
+            # Optimized maps (both normal and heatmap for each algorithm)
             for algo_name, solution in solutions.items():
                 if solution:
                     scenario = f'{algo_name}_k{args.k}'
+                    
+                    # Normal map (blue dots + amenities)
                     visualizer.create_optimized_map(
                         solution, scenario, f"visualizations/{scenario}_map.html"
                     )
+                    
+                    # Heatmap (gradient visualization)
+                    visualizer.create_optimized_heatmap(
+                        solution, scenario, f"visualizations/{scenario}_heatmap.html"
+                    )
+                    
+                    # Comparison map
                     visualizer.create_comparison_map(
                         solution, scenario, f"visualizations/{scenario}_comparison.html"
                     )

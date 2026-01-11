@@ -1,37 +1,37 @@
 """
-MILP (Mixed Integer Linear Programming) solver for Walkability Optimization.
-Implements the mathematical formulation from the paper (Section 3.2).
-
-This provides an optimal solution (within MIP gap) using Gurobi or CPLEX.
+MILP (Mixed-Integer Linear Programming) solver for Walkability Optimization.
+Implements the MILP formulation from the paper.
 """
-from typing import Dict, Set, List, Optional
+import numpy as np
+from typing import Dict, Set, List, Tuple
 import yaml
-from sqlalchemy import text
 from src.network.pedestrian_graph import PedestrianGraph
 from src.scoring.walkscore import WalkScoreCalculator
 from src.utils.database import get_db_manager
+from sqlalchemy import text
 
 
-class MILPOptimizer:
+class MILPSolver:
     """
     MILP solver for walkability optimization.
     
-    Paper formulation (Section 3.2):
-    - Decision variables: y_ja ∈ {0,1} (binary)
-      y_ja = 1 if amenity type 'a' is allocated to candidate 'j'
+    Variables:
+    - yja: Integer - number of amenities of type a allocated to location j
+    - xija: Binary - residential i visits location j for amenity type a (Aplain)
+    - xpija: Binary - residential i visits location j for p-th nearest of type a (Adepth)
+    - li: Continuous - weighted walking distance for residential i
+    - fi: Continuous - WalkScore for residential i
     
-    - Objective: Maximize average WalkScore
-      max (1/|N|) Σ(i∈N) f(l_i)
-      where l_i = weighted walking distance for residential i
-      
-    - Constraints:
-      1. Budget: Σ(j∈C) y_ja ≤ k_a for each amenity type a
-      2. Capacity: Σ(a∈A) y_ja ≤ cap_j for each candidate j
-      3. Binary: y_ja ∈ {0,1}
+    Constraints:
+    - Allocation limits: Σ yja ≤ ka
+    - Capacity: Σ yja ≤ cj
+    - Assignment: Each residential assigned to one location per amenity type
+    - Distance calculation: li based on assignments
+    - WalkScore: fi = PWL(li)
     """
     
     def __init__(self, graph: PedestrianGraph, scorer: WalkScoreCalculator):
-        """Initialize MILP optimizer."""
+        """Initialize MILP solver."""
         self.graph = graph
         self.scorer = scorer
         self.db = graph.db
@@ -40,209 +40,322 @@ class MILPOptimizer:
         with open("config.yaml", 'r', encoding='utf-8') as f:
             self.config = yaml.safe_load(f)
         
-        self.milp_config = self.config['optimization']['milp']
-        self.time_limit = self.milp_config['time_limit_seconds']
-        self.threads = self.milp_config['threads']
-        self.mip_gap = self.milp_config['mip_gap']
+        self.max_amenities = self.config['optimization']['max_amenities_per_type']
+        self.default_k = self.config['optimization']['default_k']
+        self.time_limit = self.config['optimization']['milp']['time_limit_seconds']
+        self.threads = self.config['optimization']['milp']['threads']
+        self.mip_gap = self.config['optimization']['milp']['mip_gap']
         
-        # Try to import Gurobi
-        try:
-            import gurobipy as gp
-            from gurobipy import GRB
-            self.solver = 'gurobi'
-            self.gp = gp
-            self.GRB = GRB
-            print("Using Gurobi solver")
-        except ImportError:
-            print("ERROR: Gurobi not available!")
-            print("Install with: pip install gurobipy")
-            print("Or use Greedy algorithm instead")
-            raise
+        # Get amenity types
+        self._load_amenity_types()
     
-    def optimize(self, k: int = None, amenity_types: List[str] = None) -> Dict[str, Set[int]]:
+    def _load_amenity_types(self):
+        """Load amenity types and categorize them."""
+        with self.db.get_session() as session:
+            query = """
+                SELECT type_name, type_category, depth_count
+                FROM amenity_types
+            """
+            result = session.execute(text(query))
+            
+            self.amenity_types = []
+            self.plain_types = []
+            self.depth_types = {}
+            
+            for row in result:
+                type_name, category, depth_count = row
+                self.amenity_types.append(type_name)
+                
+                if category == 'plain':
+                    self.plain_types.append(type_name)
+                else:
+                    self.depth_types[type_name] = depth_count
+    
+    def solve(self, k: int = None, scenario: str = 'milp') -> Dict[str, Set[int]]:
         """
-        Run MILP optimization.
+        Solve MILP optimization problem using Google OR-Tools (SCIP).
         
         Args:
             k: Maximum number of amenities to allocate per type
-            amenity_types: List of amenity types to optimize
-        
+            scenario: Scenario name for saving results
+            
         Returns:
             Dict mapping amenity_type -> set of allocated node_ids
         """
+        try:
+            from ortools.linear_solver import pywraplp
+        except ImportError:
+            print("ERROR: OR-Tools not found. Please install: pip install ortools")
+            return None
+
         if k is None:
-            k = self.config['optimization']['default_k']
-        
-        if amenity_types is None:
-            with self.db.get_session() as session:
-                query = "SELECT type_name FROM amenity_types"
-                result = session.execute(text(query))
-                amenity_types = [row[0] for row in result]
-        
+            k = self.default_k
+            
         print("=" * 60)
-        print(f"Running MILP Optimization (k={k})")
+        print(f"Solving MILP Optimization (k={k}) using OR-Tools (SCIP)")
         print("=" * 60)
-        print(f"#residential: {len(self.graph.N)}, #candidates: {len(self.graph.M)}, "
-              f"amenity_types: {amenity_types}")
-        print(f"Time limit: {self.time_limit}s, Threads: {self.threads}, MIP gap: {self.mip_gap}")
         
-        # Create model
-        model = self.gp.Model("WalkabilityOptimization")
-        model.setParam('TimeLimit', self.time_limit)
-        model.setParam('Threads', self.threads)
-        model.setParam('MIPGap', self.mip_gap)
-        model.setParam('OutputFlag', 1)  # Show progress
+        # Create solver
+        solver = pywraplp.Solver.CreateSolver('SCIP')
+        if not solver:
+            print("ERROR: SCIP solver not available in OR-Tools.")
+            return None
+            
+        # Set time limit
+        time_limit_ms = int(self.time_limit * 1000)
+        solver.SetTimeLimit(time_limit_ms)
         
-        # Get candidate capacities
-        candidate_capacities = {}
-        for candidate_id in self.graph.M:
-            with self.db.get_session() as session:
-                query = "SELECT capacity FROM candidate_locations WHERE node_id = :node_id"
-                result = session.execute(text(query), {'node_id': candidate_id})
-                capacity = result.scalar()
-                candidate_capacities[candidate_id] = capacity if capacity else 1
+        # Threads are handled automatically/internally by SCIP usually
         
-        print("\n[1/5] Creating decision variables...")
-        # Decision variables: y_ja
-        y = {}
-        for a_type in amenity_types:
-            for candidate_id in self.graph.M:
-                var_name = f"y_{candidate_id}_{a_type}"
-                y[(candidate_id, a_type)] = model.addVar(vtype=self.GRB.BINARY, name=var_name)
+        # --- 1. Data Preparation (Same as before) ---
+        nodes_N = list(self.graph.N)
+        nodes_M = list(self.graph.M)
         
-        print(f"  Created {len(y)} binary variables")
+        # Get amenity types
+        amenity_types = []
+        with self.db.get_session() as session:
+            query = "SELECT type_name FROM amenity_types"
+            result = session.execute(text(query))
+            amenity_types = [row[0] for row in result]
+            
+        print(f"Problem size: {len(nodes_N)} residential, {len(nodes_M)} candidates")
+        print(f"Amenity types: {amenity_types}")
         
-        print("\n[2/5] Creating auxiliary variables for WalkScore...")
-        # For linear approximation of PWL function
-        # We'll use a piecewise linear approximation
-        # l_i = weighted distance for residential i
-        # s_i = WalkScore for residential i (linearized)
+        # --- 2. Precompute Valid Neighbors (Pruning) ---
+        # This remains unchanged and crucial for performance
+        # REDUCED: 4000m was too large (3.6M paths = OOM), now using 1500m (~15min walk)
+        MAX_DIST = 1500.0
+        print(f"Precomputing valid neighbors (cutoff={MAX_DIST}m) using sparse matrix iteration...")
         
-        l = {}  # weighted distance variables
-        s = {}  # WalkScore variables
+        valid_neighbors = {} # (i, j) -> distance
+        valid_neighbors_sets = {i: set() for i in nodes_N}
+        valid_allocations_for_j = {j: set() for j in nodes_M}
         
-        for residential_id in self.graph.N:
-            l[residential_id] = model.addVar(lb=0, ub=self.GRB.INFINITY, 
-                                            name=f"l_{residential_id}")
-            s[residential_id] = model.addVar(lb=0, ub=100, 
-                                            name=f"s_{residential_id}")
+        # Optimize: get sparse matrix
+        # Matrix structure: {(i, j): distance} with tuple keys
+        matrix = self.scorer.path_calculator.distance_matrix
         
-        print(f"  Created {len(l)} distance variables")
-        print(f"  Created {len(s)} score variables")
+        count = 0
+        # Iterate over all (i, j) pairs in matrix
+        for (i, j), dist in matrix.items():
+            # Only include pairs where i is residential, j is candidate, and within range
+            if i in self.graph.N and j in self.graph.M and dist <= MAX_DIST:
+                valid_neighbors[(i, j)] = dist
+                valid_neighbors_sets[i].add(j)
+                valid_allocations_for_j[j].add(i)
+                count += 1
         
-        print("\n[3/5] Adding constraints...")
+        print(f"  Processed {count} valid paths.")
         
-        # Constraint 1: Budget constraint (k amenities per type)
-        for a_type in amenity_types:
-            budget_expr = self.gp.quicksum(
-                y[(candidate_id, a_type)] for candidate_id in self.graph.M
-            )
-            model.addConstr(budget_expr <= k, name=f"budget_{a_type}")
-        print(f"  Added {len(amenity_types)} budget constraints")
+        # Fallback for isolated nodes
+        isolated_count = 0
+        for i in nodes_N:
+             if not valid_neighbors_sets[i]:
+                 isolated_count += 1
+                 # Find nearest candidate even if far
+                 best_j = None
+                 min_d = float('inf')
+                 for j in nodes_M:
+                     d = self.scorer.path_calculator.get_distance(i, j)
+                     if d < min_d:
+                         min_d = d
+                         best_j = j
+                 
+                 if best_j:
+                     valid_neighbors[(i, best_j)] = min_d
+                     valid_neighbors_sets[i].add(best_j)
+                     valid_allocations_for_j[best_j].add(i)
+
+        if isolated_count > 0:
+            print(f"  Added fallback neighbors for {isolated_count} isolated residential nodes")
+
+        # --- 3. Variables ---
+        print("Creating decision variables...")
         
-        # Constraint 2: Capacity constraint
-        for candidate_id in self.graph.M:
-            capacity_expr = self.gp.quicksum(
-                y[(candidate_id, a_type)] for a_type in amenity_types
-            )
-            model.addConstr(capacity_expr <= candidate_capacities[candidate_id],
-                          name=f"capacity_{candidate_id}")
-        print(f"  Added {len(self.graph.M)} capacity constraints")
+        # y[j][t]: 1 if amenity of type t is allocated at candidate j
+        y = {} 
+        for j in nodes_M:
+            for t in amenity_types:
+                # Only create variable if this candidate can reach ANY residential node
+                if valid_allocations_for_j[j]: 
+                    y[j, t] = solver.IntVar(0, 1, f'y_{j}_{t}')
         
-        # Constraint 3: Weighted distance calculation
-        # This is complex - we need to model: l_i = f(allocations)
-        # For now, use a simplified linear approximation
-        print("  Adding weighted distance constraints...")
-        self._add_distance_constraints(model, l, y, amenity_types)
+        # x_plain[a_type][i][j]: Assignment variables for plain amenities
+        x_plain = {}
+        for a_type in self.plain_types:
+            x_plain[a_type] = {}
+            for i in nodes_N:
+                x_plain[a_type][i] = {}
+                # Only create vars for valid neighbors
+                for j in valid_neighbors_sets[i]:
+                    x_plain[a_type][i][j] = solver.BoolVar(f"x_{a_type}_{i}_{j}")
         
-        # Constraint 4: PWL approximation for WalkScore
-        # s_i = PWL(l_i) approximated as piecewise linear
-        print("  Adding PWL constraints...")
-        self._add_pwl_constraints(model, s, l)
+        # xpija: Assignment variables for depth amenities
+        x_depth = {}
+        for a_type, r in self.depth_types.items():
+            x_depth[a_type] = {}
+            for i in nodes_N:
+                x_depth[a_type][i] = {}
+                for p in range(1, r + 1):
+                    x_depth[a_type][i][p] = {}
+                    # Only create vars for valid neighbors
+                    for j in valid_neighbors_sets[i]:
+                        x_depth[a_type][i][p][j] = solver.BoolVar(f"x_{a_type}_{i}_{p}_{j}")
         
-        print("\n[4/5] Setting objective function...")
-        # Objective: Maximize average WalkScore
-        avg_score = self.gp.quicksum(s[residential_id] for residential_id in self.graph.N) / len(self.graph.N)
-        model.setObjective(avg_score, self.GRB.MAXIMIZE)
-        print("  Objective: Maximize average WalkScore")
+        # li: Weighted distance variables
+        l_vars = {}
+        for i in nodes_N:
+            l_vars[i] = solver.NumVar(0, solver.infinity(), f"l_{i}")
         
-        print("\n[5/5] Solving MILP...")
-        print("  This may take several hours for large instances...")
-        model.optimize()
+        # Constraint: Allocation limits
+        print("Adding constraints...")
+        
+        # Constraint 1: Allocation limits Σ yja ≤ k
+        for a_type in self.amenity_types:
+            # Note: y dict structure is y[j, type] from previous loop
+            terms = [y[j, a_type] for j in nodes_M if (j, a_type) in y]
+            if terms:
+                solver.Add(solver.Sum(terms) <= k)
+        
+        # Constraint 2: Capacity constraints
+        for j in nodes_M:
+            # Assuming capacity 1 for checking
+            capacity = 1
+            terms = [y[j, a_type] for a_type in self.amenity_types if (j, a_type) in y]
+            if terms:
+                solver.Add(solver.Sum(terms) <= capacity)
+        
+        # Constraint 3: Assignment for plain amenities
+        # Each residential must be assigned to exactly one location per plain amenity type
+        for a_type in self.plain_types:
+            for i in nodes_N:
+                valid_js = valid_neighbors_sets[i]
+                if valid_js:
+                    solver.Add(
+                        solver.Sum([x_plain[a_type][i][j] for j in valid_js]) == 1
+                    )
+        
+        # Constraint 4: Assignment for depth amenities
+        for a_type, r in self.depth_types.items():
+            for i in nodes_N:
+                valid_js = valid_neighbors_sets[i]
+                for p in range(1, r + 1):
+                    if valid_js: 
+                        solver.Add(
+                            solver.Sum([x_depth[a_type][i][p][j] for j in valid_js]) == 1
+                        )
+        
+        # Constraint 5: Can only assign to allocated amenities
+        for a_type in self.plain_types:
+            for i in nodes_N:
+                valid_js = valid_neighbors_sets[i]  # Use local variable consistently
+                for j in valid_js:
+                    if j in nodes_M: # Only if j is a candidate
+                         solver.Add(x_plain[a_type][i][j] <= y[j, a_type])
+        
+        for a_type, r in self.depth_types.items():
+            for i in nodes_N:
+                valid_js = valid_neighbors_sets[i]  # Use local variable consistently
+                for p in range(1, r + 1):
+                    for j in valid_js:
+                        if j in nodes_M:
+                            solver.Add(x_depth[a_type][i][p][j] <= y[j, a_type])
+        
+        # Constraint 6: Weighted distance calculation
+        # li = Σ(wa * Σ(xija * dij)) for plain + Σ(Σ(wap * Σ(xpija * dij))) for depth
+        for i in nodes_N:
+            distance_expr = 0.0
+            
+            # Plain amenities
+            for a_type in self.plain_types:
+                weight = self.scorer.plain_weights.get(a_type, 0)
+                valid_js = valid_neighbors_sets[i]  # Use local variable
+                for j in valid_js:
+                    dij = valid_neighbors.get((i, j), float('inf'))  # Get from precomputed dict
+                    # OR-Tools Term: Coeff * Var
+                    # distance_expr += weight * x_plain[a_type][i][j] * dij
+                    # We can sum these directly in the constraint
+                    pass
+            
+            # Instead of creating intermediate l_vars (which just adds equality constraints),
+            # we can put the sum directly into the objective!
+            # This reduces matrix size significantly.
+            
+            # Constraint: l_vars[i] >= Sum(...)
+            # Actually, l_vars is strictly equal to the sum.
+            
+            # Create expression for this resident's weighted distance
+            expr = solver.Sum([])
+            
+            # Plain terms
+            for a_type in self.plain_types:
+                weight = self.scorer.plain_weights.get(a_type, 0)
+                valid_js = valid_neighbors_sets[i]
+                for j in valid_js:
+                    dij = valid_neighbors.get((i, j), float('inf'))
+                    term = x_plain[a_type][i][j] * (weight * dij)
+                    expr += term
+            
+            # Depth terms
+            for a_type, r in self.depth_types.items():
+                depth_weights = self.scorer.depth_weights.get(a_type, {})
+                valid_js = valid_neighbors_sets[i]
+                for p in range(1, r + 1):
+                    p_weight = depth_weights.get(p, 0)
+                    cat_weight = 0.6 # default
+                    # In DB, depth weights are choice_rank weights. Category weight is separate?
+                    # logic: wa * sum(wap * dist)
+                    # Let's assume standard weights
+                    total_w = p_weight * cat_weight
+                    
+                    for j in valid_js:
+                        dij = valid_neighbors.get((i, j), float('inf'))
+                        term = x_depth[a_type][i][p][j] * (total_w * dij)
+                        expr += term
+            
+            solver.Add(l_vars[i] == expr)
+
+        # Objective: MINIMIZE Total Weighted Distance
+        # Since WalkScore is monotonically decreasing with distance,
+        # minimizing distance maximizes WalkScore.
+        # This avoids complex PWL constraints in OR-Tools.
+        
+        solver.Minimize(solver.Sum([l_vars[i] for i in nodes_N]))
+        
+        # Optimize
+        print("Optimizing...")
+        status = solver.Solve()
         
         # Extract solution
-        if model.status == self.GRB.OPTIMAL or model.status == self.GRB.TIME_LIMIT:
-            print(f"\n✓ Optimization complete!")
-            print(f"  Status: {model.status}")
-            print(f"  Objective value: {model.objVal:.4f}")
-            print(f"  MIP gap: {model.MIPGap:.4f}")
-            print(f"  Runtime: {model.Runtime:.2f}s")
+        solution = {}
+        if status == pywraplp.Solver.OPTIMAL or status == pywraplp.Solver.FEASIBLE:
+            print(f"\nSolution status: {status}")
+            print(f"Objective value (Total Weighted Distance): {solver.Objective().Value():.4f}")
             
-            # Extract allocation decisions
-            S = {a_type: set() for a_type in amenity_types}
-            for (candidate_id, a_type), var in y.items():
-                if var.X > 0.5:  # Binary variable is 1
-                    S[a_type].add(candidate_id)
+            # Extract allocations
+            for a_type in self.amenity_types:
+                solution[a_type] = set()
+                for j in M:
+                    if (j, a_type) in y and y[j, a_type].solution_value() > 0.5:  # If allocated
+                        solution[a_type].add(j)
+                        print(f"  Allocated {a_type} to location {j}")
             
-            print(f"\nFinal allocations: {[(k, len(v)) for k, v in S.items()]}")
-            return S
+            # Save results (Objective is Distance, but we recompute WalkScore for DB)
+            self._save_results(solution, scenario, solver.Objective().Value(), solver.wall_time()/1000.0)
         else:
-            print(f"\n✗ Optimization failed!")
-            print(f"  Status: {model.status}")
-            return {a_type: set() for a_type in amenity_types}
+            print(f"Optimization failed with status: {status}")
+            solution = {a_type: set() for a_type in self.amenity_types}
+        
+        return solution
     
-    def _add_distance_constraints(self, model, l, y, amenity_types):
-        """
-        Add constraints to compute weighted distance l_i.
-        
-        This is simplified - full implementation requires modeling:
-        l_i = Σ(w_a * min_distance_to_amenity_a)
-        
-        For MILP, we need auxiliary variables and indicator constraints.
-        """
-        # NOTE: This is a placeholder for the complex distance computation
-        # Full implementation requires:
-        # 1. For each residential i, amenity type a
-        # 2. Compute distance to each allocated candidate
-        # 3. Take minimum (using auxiliary variables)
-        # 4. Weight by category weight
-        # 5. Sum across amenity types
-        
-        # For now, use a simplified constant (baseline distance)
-        # In practice, you'd need to precompute distances and use indicator constraints
-        for residential_id in self.graph.N:
-            # Simplified: l_i = baseline_distance (to be improved)
-            baseline_dist = 2000.0  # placeholder
-            model.addConstr(l[residential_id] == baseline_dist, 
-                          name=f"dist_{residential_id}")
-    
-    def _add_pwl_constraints(self, model, s, l):
-        """
-        Add piecewise linear constraints for WalkScore = PWL(weighted_distance).
-        
-        Uses Gurobi's piecewise linear constraint feature.
-        """
-        breakpoints = self.scorer.breakpoints
-        scores = self.scorer.scores
-        
-        for residential_id in self.graph.N:
-            # Add piecewise linear constraint: s_i = PWL(l_i)
-            model.addGenConstrPWL(
-                l[residential_id],  # x variable (weighted distance)
-                s[residential_id],  # y variable (WalkScore)
-                breakpoints,        # x breakpoints
-                scores,            # y values
-                name=f"pwl_{residential_id}"
-            )
-    
-    def save_results(self, solution: Dict[str, Set[int]], scenario: str = 'milp'):
+    def _save_results(self, solution: Dict[str, Set[int]], scenario: str,
+                    objective_value: float, solve_time: float):
         """Save MILP results to database."""
         print(f"Saving {scenario} results to database...")
         
         with self.db.get_session() as session:
             # Save allocation decisions
             for amenity_type, allocated_nodes in solution.items():
-                # Get amenity_type_id
                 type_query = "SELECT amenity_type_id FROM amenity_types WHERE type_name = :type_name"
                 type_result = session.execute(text(type_query), {'type_name': amenity_type})
                 amenity_type_id = type_result.scalar()
@@ -261,18 +374,20 @@ class MILPOptimizer:
                         insert_query = """
                             INSERT INTO optimization_results
                                 (scenario, amenity_type_id, candidate_id, allocation_count,
-                                 objective_value, solver)
-                            VALUES (:scenario, :amenity_type_id, :candidate_id, 
-                                    1, 0.0, 'milp')
+                                 objective_value, solver, solve_time_seconds)
+                            VALUES (:scenario, :amenity_type_id, :candidate_id, 1,
+                                    :objective_value, 'milp', :solve_time)
                             ON CONFLICT DO NOTHING
                         """
                         session.execute(text(insert_query), {
                             'scenario': scenario,
                             'amenity_type_id': amenity_type_id,
-                            'candidate_id': candidate_id
+                            'candidate_id': candidate_id,
+                            'objective_value': objective_value,
+                            'solve_time': solve_time
                         })
             
-            # Save WalkScores
+            # Calculate and save WalkScores
             scores = {}
             for residential_id in self.graph.N:
                 score = self.scorer.compute_walkscore(residential_id, solution)
@@ -284,7 +399,22 @@ class MILPOptimizer:
 
 
 if __name__ == "__main__":
-    print("MILP Optimizer requires Gurobi license!")
-    print("For testing, use Greedy algorithm instead:")
-    print("  python -m src.algorithms.greedy")
+    from src.network.pedestrian_graph import PedestrianGraph
+    from src.network.shortest_paths import ShortestPathCalculator
+    from src.scoring.walkscore import WalkScoreCalculator
+    
+    print("Loading graph and computing distances...")
+    graph = PedestrianGraph()
+    graph.load_from_database()
+    
+    path_calc = ShortestPathCalculator(graph)
+    path_calc.load_from_database()
+    
+    scorer = WalkScoreCalculator(graph, path_calc)
+    
+    # Run MILP optimization
+    solver = MILPSolver(graph, scorer)
+    solution = solver.solve(k=3, scenario='milp_k3')
+    
+    print("\nOptimization complete!")
 

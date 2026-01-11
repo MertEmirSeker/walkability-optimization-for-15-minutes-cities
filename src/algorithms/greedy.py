@@ -115,7 +115,7 @@ class GreedyOptimizer:
         # PAPER: Use ALL candidates, no sampling!
         candidate_capacities = {}
         all_candidates = list(self.graph.M)
-        
+
         print(f"Using ALL {len(all_candidates)} candidates (no sampling)")
 
         for candidate_id in all_candidates:
@@ -255,12 +255,11 @@ class GreedyOptimizer:
         if not self._is_cache_valid(current_S):
             self._rebuild_cache(current_S)
         
-        # OPTIMIZATION: Use pre-computed nearby residentials!
-        # This is MUCH faster than checking 34,424 distances every time
-        affected_residentials = self.nearby_residentials.get(candidate_id, [])
+        # OPTIMIZATION: Use pre-computed nearby residentials (network nodes)!
+        affected_network_nodes = self.nearby_residentials.get(candidate_id, [])
         
         # If no residentials are close enough, no improvement
-        if not affected_residentials:
+        if not affected_network_nodes:
             return 0.0
         
         # Create new solution with added allocation
@@ -272,22 +271,31 @@ class GreedyOptimizer:
             new_S[amenity_type] = set()
         new_S[amenity_type].add(candidate_id)
         
-        # Calculate improvement for affected residentials only
+        # ✅ CRITICAL FIX: Calculate improvement for ALL buildings that snap to affected nodes
+        # Multiple buildings can snap to the same network node!
         total_improvement = 0.0
         
-        for residential_id in affected_residentials:
-            # Current WalkScore (from cache!)
-            old_score = self.walkscore_cache[residential_id]
+        # Find all buildings that snap to affected network nodes
+        affected_buildings = [
+            (res_id, snap_id) for res_id, snap_id in self.graph.residential_buildings
+            if snap_id in affected_network_nodes
+        ]
+        
+        for residential_id, snapped_node_id in affected_buildings:
+            # Current WalkScore (from cache, using network node!)
+            old_score = self.walkscore_cache[snapped_node_id]
             
-            # New WalkScore with added amenity (compute fresh)
-            new_score = self.scorer.compute_walkscore(residential_id, new_S)
+            # New WalkScore with added amenity
+            new_score = self.scorer.compute_walkscore(snapped_node_id, new_S)
             
-            # Improvement for this residential
+            # Improvement for this building
             total_improvement += (new_score - old_score)
         
-        # Average improvement across ALL residentials (not just affected ones!)
+        # Average improvement across ALL residential BUILDINGS (not just affected network nodes!)
         # This is correct because unaffected residentials have 0 improvement
-        improvement = total_improvement / len(self.graph.N) if len(self.graph.N) > 0 else 0.0
+        # ✅ FIXED: Divide by total number of buildings, not unique network nodes
+        num_buildings = len(self.graph.residential_buildings)
+        improvement = total_improvement / num_buildings if num_buildings > 0 else 0.0
         
         return improvement
     
@@ -306,13 +314,18 @@ class GreedyOptimizer:
         return True
     
     def _rebuild_cache(self, current_S: Dict[str, Set[int]]):
-        """Rebuild WalkScore cache for current_S."""
-        print(f"  [Cache] Rebuilding WalkScore cache for {len(self.graph.N)} residentials...")
+        """
+        Rebuild WalkScore cache for current_S.
+        
+        NOTE: Cache is per network node (not per building), which is correct
+        because multiple buildings can snap to the same network node.
+        """
+        print(f"  [Cache] Rebuilding WalkScore cache for {len(self.graph.N)} network nodes...")
         
         self.walkscore_cache = {}
-        for residential_id in self.graph.N:
-            score = self.scorer.compute_walkscore(residential_id, current_S)
-            self.walkscore_cache[residential_id] = score
+        for network_node_id in self.graph.N:
+            score = self.scorer.compute_walkscore(network_node_id, current_S)
+            self.walkscore_cache[network_node_id] = score
         
         # Deep copy current_S to track cache validity
         self.current_S_cache = {}
@@ -346,8 +359,12 @@ class GreedyOptimizer:
                 print(f"  Progress: {idx}/{total} candidates processed...", end='\r')
         
         print()  # New line
-        avg_nearby = sum(len(v) for v in self.nearby_residentials.values()) / len(self.nearby_residentials)
-        print(f"  Avg residentials per candidate: {avg_nearby:.0f}")
+        if len(self.nearby_residentials) > 0:
+            avg_nearby = sum(len(v) for v in self.nearby_residentials.values()) / len(self.nearby_residentials)
+            print(f"  Avg residentials per candidate: {avg_nearby:.0f}")
+        else:
+            print("  ⚠️ WARNING: No candidate locations found!")
+            raise ValueError("Cannot run optimization: No candidate locations in database. Please run data loading first.")
     
     def _update_cache_after_allocation(self, current_S: Dict[str, Set[int]], 
                                        amenity_type: str, candidate_id: int):
@@ -361,16 +378,17 @@ class GreedyOptimizer:
         
         This is MUCH faster than rebuilding entire cache!
         """
-        # Use pre-computed nearby residentials
-        affected_residentials = self.nearby_residentials.get(candidate_id, [])
+        # Use pre-computed nearby network nodes
+        affected_network_nodes = self.nearby_residentials.get(candidate_id, [])
         
-        # Update only affected residentials
-        print(f"  [Cache] Updating {len(affected_residentials)} affected residentials")
+        # Update only affected network nodes
+        # NOTE: Multiple buildings may snap to each node, but cache is per node
+        print(f"  [Cache] Updating {len(affected_network_nodes)} affected network nodes")
         
-        for residential_id in affected_residentials:
+        for network_node_id in affected_network_nodes:
             # Recompute WalkScore with new allocation
-            new_score = self.scorer.compute_walkscore(residential_id, current_S)
-            self.walkscore_cache[residential_id] = new_score
+            new_score = self.scorer.compute_walkscore(network_node_id, current_S)
+            self.walkscore_cache[network_node_id] = new_score
         
         # Update current_S_cache to reflect new allocation
         if amenity_type not in self.current_S_cache:
@@ -379,25 +397,26 @@ class GreedyOptimizer:
     
     def _calculate_objective(self, allocated_amenities: Dict[str, Set[int]]) -> float:
         """
-        Calculate EXACT average WalkScore across ALL residential locations.
+        Calculate EXACT average WalkScore across ALL residential BUILDINGS.
         
-        PAPER: Uses ALL residential locations, not a sample!
-        Objective = (1/|N|) * Σ(i∈N) f(li)
+        ✅ FIXED: Uses ALL buildings (26,931), not just network nodes (9,893)
+        
+        PAPER: Objective = (1/|N|) * Σ(i∈N) f(li)
         where f() = PWL function, li = weighted distance for residential i
         
         Returns:
-            Average WalkScore across all residential locations
+            Average WalkScore across all residential buildings
         """
         total_score = 0.0
         count = 0
 
-        all_res = list(self.graph.N)
-        if not all_res:
+        if not self.graph.residential_buildings:
             return 0.0
 
-        # Use ALL residential locations - NO SAMPLING!
-        for residential_id in all_res:
-            score = self.scorer.compute_walkscore(residential_id, allocated_amenities)
+        # Use ALL residential buildings - NO SAMPLING!
+        for residential_id, snapped_node_id in self.graph.residential_buildings:
+            # Use snapped_node_id for pathfinding
+            score = self.scorer.compute_walkscore(snapped_node_id, allocated_amenities)
             total_score += score
             count += 1
 
@@ -422,18 +441,19 @@ class GreedyOptimizer:
                     continue
                 
                 # Get candidate_id for each allocated node
-                for node_id in allocated_nodes:
+                # CRITICAL: solution contains snapped_node_id, not node_id
+                for snapped_node_id in allocated_nodes:
                     cand_query = """
-                        SELECT candidate_id FROM candidate_locations WHERE node_id = :node_id
+                        SELECT candidate_id FROM candidate_locations WHERE snapped_node_id = :snapped_node_id
                     """
-                    cand_result = session.execute(text(cand_query), {'node_id': node_id})
+                    cand_result = session.execute(text(cand_query), {'snapped_node_id': snapped_node_id})
                     candidate_id = cand_result.scalar()
                     
                     if candidate_id:
                         # Count how many amenities of this type allocated to this candidate
                         allocation_count = sum(
                             1 for a_type, nodes in solution.items()
-                            if a_type == amenity_type and node_id in nodes
+                            if a_type == amenity_type and snapped_node_id in nodes
                         )
                         
                         # Insert or update optimization result
@@ -453,13 +473,18 @@ class GreedyOptimizer:
                             'objective_value': final_obj
                         })
             
-            # Save WalkScores
+            # Save WalkScores for ALL buildings
             scores = {}
-            for residential_id in self.graph.N:
-                score = self.scorer.compute_walkscore(residential_id, solution)
+            weighted_distances = {}
+            for residential_id, snapped_node_id in self.graph.residential_buildings:
+                # Use snapped_node_id for pathfinding
+                weighted_dist = self.scorer.compute_weighted_distance(snapped_node_id, solution)
+                score = self.scorer.piecewise_linear_score(weighted_dist)
+                # Store with residential_id (building ID)
                 scores[residential_id] = score
+                weighted_distances[residential_id] = weighted_dist
             
-            self.scorer._save_scores_to_db(scores, scenario=scenario)
+            self.scorer._save_scores_to_db(scores, weighted_distances, scenario=scenario)
         
         print(f"Saved results for scenario: {scenario}")
 

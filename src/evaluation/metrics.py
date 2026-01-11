@@ -43,6 +43,12 @@ class MetricsEvaluator:
         print(f"Evaluating scenario: {scenario}")
         print(f"{'='*60}\n")
         
+        # Load solution if not provided (SKIP for baseline)
+        if solution is None and scenario != 'baseline':
+            solution = self._load_solution(scenario)
+            if solution:
+                print(f"Loaded solution for {scenario} with {sum(len(v) for v in solution.values())} allocated amenities")
+        
         # Load WalkScores
         baseline_scores = self._load_scores('baseline')
         scenario_scores = self._load_scores(scenario)
@@ -113,6 +119,29 @@ class MetricsEvaluator:
             """
             result = session.execute(text(query), {'scenario': scenario})
             return {row[0]: float(row[1]) for row in result}
+
+    def _load_solution(self, scenario: str) -> Dict[str, Set[int]]:
+        """Load optimization solution from database."""
+        solution = {}
+        with self.db.get_session() as session:
+            # Join with amenity_types to get type name
+            query = """
+                SELECT t.type_name, r.candidate_id
+                FROM optimization_results r
+                JOIN amenity_types t ON r.amenity_type_id = t.amenity_type_id
+                WHERE r.scenario = :scenario
+            """
+            result = session.execute(text(query), {'scenario': scenario})
+            
+            for row in result:
+                amenity_type = row[0]
+                location_id = row[1]
+                
+                if amenity_type not in solution:
+                    solution[amenity_type] = set()
+                solution[amenity_type].add(location_id)
+                
+        return solution
     
     def _calculate_avg_distances(self, scores: Dict[int, float],
                                 solution: Dict[str, Set[int]] = None) -> float:

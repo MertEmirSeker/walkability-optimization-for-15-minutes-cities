@@ -31,7 +31,7 @@ class AlgorithmPanel(QWidget):
         # Algorithm Selection
         form_layout.addWidget(QLabel("Algorithm:"))
         self.algo_combo = QComboBox()
-        self.algo_combo.addItems(["greedy", "milp", "both"])
+        self.algo_combo.addItems(["greedy"])
         form_layout.addWidget(self.algo_combo)
         
         # K Parameter
@@ -92,6 +92,9 @@ class AlgorithmPanel(QWidget):
         self.run_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         
+        # Emit signal immediately for UI feedback
+        self.optimization_started.emit(algo, k)
+        
         # Construct command
         # python -m src.main --skip-data-load --skip-distances --visualize --algorithm {algo} --k {k}
         
@@ -134,9 +137,6 @@ class AlgorithmPanel(QWidget):
         
         self.process.start(python_exe, args)
         self.process.finished.connect(self._on_finished)
-        
-        # Emit signal for other widgets to know
-        self.optimization_started.emit(algo, k)
 
     def _stop_optimization(self):
         if self.process and self.process.state() == QProcess.Running:

@@ -14,7 +14,6 @@ from src.network.pedestrian_graph import PedestrianGraph
 from src.network.shortest_paths import ShortestPathCalculator
 from src.scoring.walkscore import WalkScoreCalculator
 from src.algorithms.greedy import GreedyOptimizer
-from src.algorithms.milp import MILPSolver
 from src.visualization.map_visualizer import MapVisualizer
 from src.evaluation.metrics import MetricsEvaluator
 from src.utils.database import get_db_manager
@@ -29,8 +28,8 @@ def main():
                        help='Skip distance computation (use existing)')
     parser.add_argument('--skip-baseline', action='store_true',
                        help='Skip baseline score computation')
-    parser.add_argument('--algorithm', choices=['greedy', 'milp', 'both'],
-                       default='both', help='Optimization algorithm to run')
+    parser.add_argument('--algorithm', choices=['greedy'],
+                       default='greedy', help='Optimization algorithm to run (greedy)')
     parser.add_argument('--k', type=int, default=3,
                        help='Number of amenities to allocate per type')
     parser.add_argument('--visualize', action='store_true',
@@ -155,18 +154,7 @@ def main():
             import traceback
             traceback.print_exc()
     
-    if args.algorithm in ['milp', 'both']:
-        print("Step 6b: Running MILP optimization...")
-        milp_solver = MILPSolver(graph, scorer)
-        try:
-            milp_solution = milp_solver.solve(k=args.k, scenario=f'milp_k{args.k}')
-            solutions['milp'] = milp_solution
-            print("✓ MILP optimization completed\n")
-        except Exception as e:
-            print(f"ERROR in MILP optimization: {e}")
-            import traceback
-            traceback.print_exc()
-            print("Note: MILP requires Gurobi license. Using Greedy results only.\n")
+
     
     # Step 7: Visualization
     if args.visualize and solutions:

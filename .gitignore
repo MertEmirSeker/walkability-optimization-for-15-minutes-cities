@@ -16,7 +16,7 @@ data
 *.pbf
 *.geojson
 results/
-visualizations/
+visualizations
 # Distribution / packaging
 .Python
 build/

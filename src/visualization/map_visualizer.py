@@ -413,13 +413,20 @@ class MapVisualizer:
         return m
     
     def create_baseline_heatmap(self, output_path: str = "visualizations/baseline_heatmap.html"):
-        """Create HEATMAP-ONLY baseline map."""
+        """Create HEATMAP-ONLY baseline map with colored markers by WalkScore."""
         print("Creating baseline heatmap...")
         
         m = self.create_base_map()
         self.add_all_buildings(m, max_points=10000)  # Background
         self.add_existing_amenities(m)
-        self.add_walkscore_heatmap(m, scenario='baseline')
+        
+        # Load baseline scores and add colored markers
+        with self.db.get_session() as session:
+            query = "SELECT residential_id, walkscore FROM walkability_scores WHERE scenario = 'baseline'"
+            result = session.execute(text(query))
+            baseline_scores = {row[0]: float(row[1]) for row in result}
+        
+        self.add_residential_markers(m, baseline_scores)  # Colored dots by score!
         
         # Save
         import os
@@ -432,14 +439,21 @@ class MapVisualizer:
     def create_optimized_heatmap(self, solution: Dict[str, Set[int]],
                                  scenario: str = "optimized",
                                  output_path: str = "visualizations/optimized_heatmap.html"):
-        """Create HEATMAP-ONLY optimized map."""
+        """Create HEATMAP-ONLY optimized map with colored markers by WalkScore."""
         print(f"Creating optimized heatmap ({scenario})...")
         
         m = self.create_base_map()
         self.add_all_buildings(m, max_points=10000)  # Background
         self.add_existing_amenities(m)
         self.add_allocated_amenities(m, solution, scenario)
-        self.add_walkscore_heatmap(m, scenario=scenario)
+        
+        # Load scores and add colored markers
+        with self.db.get_session() as session:
+            query = "SELECT residential_id, walkscore FROM walkability_scores WHERE scenario = :scenario"
+            result = session.execute(text(query), {'scenario': scenario})
+            scores = {row[0]: float(row[1]) for row in result}
+        
+        self.add_residential_markers(m, scores)  # Colored dots by score!
         self.add_fifteen_minute_circles(m, solution)
         
         # Save

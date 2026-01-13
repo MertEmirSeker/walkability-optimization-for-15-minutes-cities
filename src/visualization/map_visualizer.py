@@ -109,7 +109,13 @@ class MapVisualizer:
                 return
             
             # Extract centroids for point locations
-            gdf["geometry"] = gdf.geometry.centroid
+            # Extract centroids for point locations
+            # Project to Web Mercator (EPSG:3857) for accurate centroid calculation
+            if gdf.crs is None:
+                gdf.set_crs(epsg=4326, inplace=True) # Assume 4326 if None
+            
+            gdf_proj = gdf.to_crs(epsg=3857)
+            gdf["geometry"] = gdf_proj.geometry.centroid.to_crs(epsg=4326)
             gdf = gdf[gdf.geometry.type == "Point"]
             
             if max_points is not None:
@@ -227,15 +233,23 @@ class MapVisualizer:
         
         print("Added allocated amenities")
     
-    def add_candidate_locations(self, m: folium.Map, max_points: int = 100):
-        """Add candidate locations to map."""
-        print("Adding candidate locations to map...")
+    def add_candidate_locations(self, m: folium.Map, max_points: int = 200):
+        """Add candidate locations to map using ORIGINAL coordinates."""
+        print("Adding candidate locations to map (original coords)...")
         
-        candidate_coords = []
-        for cand_id in list(self.graph.M)[:max_points]:
-            lat, lon = self.graph.get_node_coordinates(cand_id)
-            if lat and lon:
-                candidate_coords.append([lat, lon])
+        with self.db.get_session() as session:
+            query = """
+                SELECT original_latitude, original_longitude
+                FROM candidate_locations
+                WHERE original_latitude IS NOT NULL 
+                  AND original_longitude IS NOT NULL
+                LIMIT :limit
+            """
+            result = session.execute(text(query), {'limit': max_points})
+            
+            candidate_coords = []
+            for row in result:
+                candidate_coords.append([float(row[0]), float(row[1])])
         
         if candidate_coords:
             for lat, lon in candidate_coords:

@@ -16,8 +16,12 @@ class StatusMonitor(QThread):
         self.log_file = log_file
         self.progress_file = progress_file
         self.running = True
+        self.start_time = None  # Track when monitoring started
         
     def run(self):
+        import time
+        self.start_time = time.time()
+        
         while self.running:
             try:
                 self._check_logs()
@@ -25,17 +29,23 @@ class StatusMonitor(QThread):
             except Exception as e:
                 print(f"Monitor error: {e}")
             
-            time.sleep(2)  # Check every 2 seconds
+            time.sleep(0.5)  # Check every 0.5 seconds
             
     def stop(self):
         self.running = False
         self.wait()
         
     def _check_logs(self):
+        import time
+        
         # 1. Parse PROGRESS.txt for high-level status
-        status = "Idle" # Default to Idle instead of Unknown
+        status = None  # Will be set based on conditions
         percent = 0.0
         eta = "--"
+        
+        # Grace period: Don't show "Idle" in first 5 seconds
+        time_since_start = time.time() - self.start_time if self.start_time else 0
+        in_grace_period = time_since_start < 5.0
         
         # Check staleness: if file hasn't been updated in 30 seconds, it's not running
         is_stale = False
@@ -65,11 +75,18 @@ class StatusMonitor(QThread):
         
         # If we found it was stale, explicitly mark as stopped if it looked like it was running
         if is_stale:
-            status = "Stopped (Stale Limit)"
+            status = "Stopped (Stale)"
             # Use percent=0 only if previously 0, otherwise keep last known percent but show stopped?
             # Actually, user prefers not seeing "Running".
             if percent > 0 and percent < 100:
                  status = f"Stopped at {percent}%"
+        
+        # Set default status if not set yet
+        if status is None:
+            if in_grace_period:
+                status = "Starting..."
+            else:
+                status = "Idle"
                     
         # 2. Parse pipeline_run.log for more granular details (fallback)
         if percent == 0 and os.path.exists(self.log_file) and not is_stale:

@@ -9,6 +9,9 @@ from PySide6.QtCore import Signal, QProcess
 
 class AlgorithmPanel(QWidget):
     optimization_started = Signal(str, int)  # algorithm, k
+    progress_updated = Signal(float, str, str) # percent, status, eta
+    optimization_finished = Signal(int, str)  # exit_code, status
+    log_output = Signal(str)  # log text for console
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -55,8 +58,17 @@ class AlgorithmPanel(QWidget):
         self.recalc_dist_cb.setChecked(False) # Default skip
         form_layout.addWidget(self.recalc_dist_cb)
         
-        # Fast Mode Note
-        note = QLabel("Note: Using skips for speed")
+        # Demo Mode Option
+        form_layout.addSpacing(10)
+        form_layout.addWidget(QLabel("Run Mode:"))
+        
+        self.demo_mode_cb = QCheckBox("Demo Mode (Fast Replay ~1 min)")
+        self.demo_mode_cb.setToolTip("Replay previously recorded optimization instead of full run")
+        self.demo_mode_cb.setChecked(False)
+        form_layout.addWidget(self.demo_mode_cb)
+        
+        # Note
+        note = QLabel("Note: Full runs auto-record for demos")
         note.setStyleSheet("color: gray; font-size: 10px;")
         form_layout.addWidget(note)
         
@@ -129,22 +141,76 @@ class AlgorithmPanel(QWidget):
                 except OSError:
                     pass
         
+        # Use -u for unbuffered output to get real-time progress
+        args.insert(0, "-u")
+        
+        # Add demo mode arguments
+        if self.demo_mode_cb.isChecked():
+            args.append("--demo-mode")
+            args.append(f"{algo}_k{k}")
+        else:
+            # Always record during normal runs
+            args.append("--record-demo")
+        
         print(f"Starting process: {python_exe} {args}")
         
-        # Redirect output to file so StatusMonitor can read it
-        self.process.setStandardOutputFile("pipeline_run.log")
-        self.process.setStandardErrorFile("pipeline_run.log")
+        # Capture output directly instead of redirecting to file
+        # We will write to file manually in the handler
+        self.process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        self.process.readyReadStandardOutput.connect(self._handle_output)
         
         self.process.start(python_exe, args)
         self.process.finished.connect(self._on_finished)
+        
+    def _handle_output(self):
+        """Read standard output, parse progress, and write to log file."""
+        data = self.process.readAllStandardOutput()
+        text = data.data().decode('utf-8', errors='ignore')
+        
+        # Emit log output for console display
+        self.log_output.emit(text)
+        
+        # Write to log file manually
+        with open("pipeline_run.log", "a", encoding='utf-8') as f:
+            f.write(text)
+            
+        # Parse output for progress
+        # Format: ::PROGRESS::{global_pct:.1f}::Running Optimization::{eta_str}
+        for line in text.splitlines():
+            if "::PROGRESS::" in line:
+                try:
+                    parts = line.split("::")  
+                    # parts[0] is empty or text before
+                    # parts[1] is PROGRESS
+                    # parts[2] is pct
+                    # parts[3] is status
+                    # parts[4] is eta
+                    if len(parts) >= 5:
+                        pct = float(parts[2])
+                        status = parts[3]
+                        eta = parts[4]
+                        self.progress_updated.emit(pct, status, eta)
+                except Exception as e:
+                    print(f"Error parsing progress: {e}")
 
     def _stop_optimization(self):
         if self.process and self.process.state() == QProcess.Running:
-            self.process.kill()
-            self.stop_btn.setEnabled(False)
-            self.run_btn.setEnabled(True)
+            reply = QMessageBox.question(
+                self, "Stop Optimization", 
+                "Are you sure you want to stop the optimization process?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                self.process.kill()
+                self.stop_btn.setEnabled(False)
+                self.run_btn.setEnabled(True)
 
     def _on_finished(self, exit_code, exit_status):
         self.run_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         print(f"Process finished with code {exit_code}")
+        
+        # Emit finished signal so MainWindow can react
+        status_str = "success" if exit_code == 0 else "failed"
+        self.optimization_finished.emit(exit_code, status_str)

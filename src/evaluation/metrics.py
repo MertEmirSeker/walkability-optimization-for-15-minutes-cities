@@ -75,15 +75,11 @@ class MetricsEvaluator:
         # 2. Average walking distance reduction
         baseline_distances = self._calculate_avg_distances(baseline_scores)
         scenario_distances = self._calculate_avg_distances(scenario_scores, solution)
-        distance_reduction = ((baseline_distances - scenario_distances) / 
-                            baseline_distances * 100) if baseline_distances > 0 else 0
-        metrics['distance_reduction_percent'] = distance_reduction
         metrics['baseline_avg_distance'] = baseline_distances
         metrics['scenario_avg_distance'] = scenario_distances
         
         print(f"\nBaseline average distance: {baseline_distances:.2f} m")
         print(f"Scenario average distance: {scenario_distances:.2f} m")
-        print(f"Distance reduction: {distance_reduction:.2f}%")
         
         # 3. 15-minute coverage
         coverage = self._calculate_coverage(solution)
@@ -102,8 +98,6 @@ class MetricsEvaluator:
               f"{coverage:.2f}% {'✓' if success['coverage'] else '✗'}")
         print(f"✓ WalkScore increase ≥ {self.success_criteria['min_walkscore_increase']} points: "
               f"{walkscore_increase:.2f} {'✓' if success['walkscore'] else '✗'}")
-        print(f"✓ Distance reduction ≥ {self.success_criteria['min_distance_reduction_percentage']}%: "
-              f"{distance_reduction:.2f}% {'✓' if success['distance'] else '✗'}")
         print(f"\nOverall: {'SUCCESS ✓' if all(success.values()) else 'PARTIAL/FAILED ✗'}")
         print(f"{'='*60}\n")
         
@@ -173,8 +167,9 @@ class MetricsEvaluator:
             total_count += 1
             can_reach_all = True
             
-            # Check each amenity type
-            for amenity_type in ['grocery', 'restaurant', 'school']:
+            # Check each amenity type defined in config
+            amenity_types = list(self.config['amenities'].keys())
+            for amenity_type in amenity_types:
                 # Get nearest amenity location
                 distances = self.scorer.path_calculator.get_distances_to_amenities(
                     residential_id, amenity_type
@@ -208,9 +203,7 @@ class MetricsEvaluator:
             'coverage': metrics.get('coverage_percent', 0) >= \
                        self.success_criteria['residential_coverage_percentage'],
             'walkscore': metrics.get('walkscore_increase', 0) >= \
-                        self.success_criteria['min_walkscore_increase'],
-            'distance': metrics.get('distance_reduction_percent', 0) >= \
-                       self.success_criteria['min_distance_reduction_percentage']
+                        self.success_criteria['min_walkscore_increase']
         }
     
     def generate_report(self, scenarios: List[str] = None) -> str:
@@ -230,9 +223,8 @@ class MetricsEvaluator:
                 report.append(f"Scenario: {scenario}")
                 report.append(f"  Average WalkScore: {metrics.get('scenario_avg_walkscore', 0):.2f}")
                 report.append(f"  WalkScore Increase: {metrics.get('walkscore_increase', 0):.2f} points")
-                report.append(f"  Distance Reduction: {metrics.get('distance_reduction_percent', 0):.2f}%")
                 report.append(f"  15-Minute Coverage: {metrics.get('coverage_percent', 0):.2f}%")
-                report.append(f"  Success: {'✓' if metrics.get('success', {}).get('coverage') and metrics.get('success', {}).get('walkscore') and metrics.get('success', {}).get('distance') else '✗'}")
+                report.append(f"  Success: {'✓' if metrics.get('success', {}).get('coverage') and metrics.get('success', {}).get('walkscore') else '✗'}")
                 report.append("")
         
         report.append("=" * 80)

@@ -51,7 +51,7 @@ class GreedyOptimizer:
         # Pre-compute nearby residentials for each candidate - CRITICAL for speed!
         self.nearby_residentials = {}  # {candidate_id: set of residential_ids within 3km}
     
-    def optimize(self, k: int = None, amenity_types: List[str] = None) -> Dict[str, Set[int]]:
+    def optimize(self, k: int = None, amenity_types: List[str] = None, record_demo: bool = False) -> Dict[str, Set[int]]:
         """
         Run greedy optimization algorithm.
         
@@ -97,6 +97,15 @@ class GreedyOptimizer:
         print(f"#residential: {len(self.graph.N)}, #candidates: {len(self.graph.M)}, "
               f"amenity_types: {amenity_types}")
         
+        # Initialize recorder if requested
+        recorder = None
+        if record_demo:
+            from src.optimization.demo_recorder import DemoRecorder
+            scenario = f'greedy_k{k}'
+            total_allocations = k * len(amenity_types)
+            recorder = DemoRecorder(self.db, scenario, 'greedy', k, total_allocations)
+            print(f"[RECORDING] Demo mode enabled - saving iterations to database")
+        
         # PRE-COMPUTE: Find nearby residentials for each candidate (within 3km)
         # This is done ONCE and saves MASSIVE time during evaluations!
         print("\n[Preprocessing] Computing nearby residentials for each candidate...")
@@ -128,6 +137,10 @@ class GreedyOptimizer:
         # Greedy iteration
         iteration = 0
         total_allocations = sum(k for _ in amenity_types)
+        
+        # Track start time for global ETA
+        import time 
+        start_time_global = time.time()
         
         while True:
             # Check if we've allocated enough
@@ -217,8 +230,38 @@ class GreedyOptimizer:
             print(f"    Improvement: +{best_increase:.6f}, Total iterations: {iteration}/{total_allocations}")
             print(f"    Current allocations: {dict(n_allocated)}")
             
-            # Calculate current objective every 5 iterations
-            if iteration % 5 == 0:
+            # Update PROGRESS.txt for Desktop App
+            try:
+                global_pct = 100 * iteration / total_allocations
+                elapsed_global = time.time() - start_time_global
+                allocs_per_sec = iteration / elapsed_global if elapsed_global > 0 else 0
+                remaining_allocs = total_allocations - iteration
+                eta_seconds = remaining_allocs / allocs_per_sec if allocs_per_sec > 0 else 0
+                
+                # Format ETA
+                if eta_seconds < 60:
+                    eta_str = f"{eta_seconds:.0f}s"
+                else:
+                    eta_str = f"{eta_seconds/60:.1f}m"
+
+                # DIRECT UI COMMUNICATION via Stdout
+                # Format: ::PROGRESS::percentage::status::eta
+                print(f"::PROGRESS::{global_pct:.1f}::Running Optimization::{eta_str}", flush=True)
+
+                # Still write to file as backup/log, but UI will prefer stdout
+                with open("PROGRESS.txt", "w") as f:
+                    f.write(f"Status: Running Optimization...\n")
+                    f.write(f"Current Progress: {global_pct:.1f}%\n")
+                    f.write(f"ETA: {eta_str}\n")
+            except Exception as e:
+                print(f"Warning: Could not write progress: {e}")
+            
+            # Calculate current objective every 5 iterations (or every iteration if recording)
+            if record_demo:
+                current_obj = self._calculate_objective(S)
+                # Record to database
+                recorder.record_iteration(a_type, candidate_id, best_increase, current_obj)
+            elif iteration % 5 == 0:
                 current_obj = self._calculate_objective(S)
                 print(f"    Current avg WalkScore = {current_obj:.4f}")
         
@@ -228,6 +271,10 @@ class GreedyOptimizer:
         # Calculate final objective
         final_obj = self._calculate_objective(S)
         print(f"Final average WalkScore: {final_obj:.4f}")
+        
+        # Finalize recording if enabled
+        if recorder:
+            recorder.finalize(final_obj)
         
         # Restore original N and M if we sampled
         if self.fast_mode_residential_sample or self.fast_mode_candidate_sample:

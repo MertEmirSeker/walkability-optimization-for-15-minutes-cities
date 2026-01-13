@@ -20,37 +20,15 @@ class ResultsPanel(QWidget):
         # Progress Section
         self.progress_group = QGroupBox("Progress")
         progress_layout = QVBoxLayout()
+        progress_layout.setSpacing(5)
+        progress_layout.setContentsMargins(5, 5, 5, 5)
         
+        # Status only
         self.status_label = QLabel("Status: Idle")
         progress_layout.addWidget(self.status_label)
         
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        progress_layout.addWidget(self.progress_bar)
-        
-        self.time_label = QLabel("ETA: --:--")
-        progress_layout.addWidget(self.time_label)
-        
         self.progress_group.setLayout(progress_layout)
         self.layout.addWidget(self.progress_group)
-        
-        # Metrics Section
-        self.metrics_group = QGroupBox("Current Metrics")
-        metrics_layout = QVBoxLayout()
-        
-        self.score_label = QLabel("Avg WalkScore: --")
-        self.score_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #2ecc71;")
-        metrics_layout.addWidget(self.score_label)
-        
-        self.allocations_label = QLabel("Allocated Amenities: 0")
-        metrics_layout.addWidget(self.allocations_label)
-        
-        self.improvement_label = QLabel("Last Improvement: --")
-        metrics_layout.addWidget(self.improvement_label)
-        
-        self.metrics_group.setLayout(metrics_layout)
-        self.layout.addWidget(self.metrics_group)
         
         # Actions
         self.view_report_btn = QPushButton("View Full Report")
@@ -60,9 +38,7 @@ class ResultsPanel(QWidget):
         self.layout.addStretch()
         
     def update_progress(self, percent: float, status: str, eta: str):
-        self.progress_bar.setValue(int(percent))
         self.status_label.setText(f"Status: {status}")
-        self.time_label.setText(f"ETA: {eta}")
         
     def update_metrics(self, score: float, allocations: int, improvement: float):
         self.score_label.setText(f"Avg WalkScore: {score:.2f}")

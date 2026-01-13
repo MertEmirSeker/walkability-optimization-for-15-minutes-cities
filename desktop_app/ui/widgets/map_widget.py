@@ -21,14 +21,12 @@ class MapWidget(QWidget):
         controls_layout.addWidget(QLabel("Map View:"))
         
         self.mode_combo = QComboBox()
-        self.mode_combo.addItem("Baseline Map", "baseline_map.html")
-        self.mode_combo.addItem("Optimized Map", "optimized_map_dynamic") # Logic to find best
-        self.mode_combo.addItem("Comparison Map", "comparison_map_dynamic")
+        self.mode_combo.setMinimumWidth(300)
         self.mode_combo.currentIndexChanged.connect(self.load_selected_map)
         controls_layout.addWidget(self.mode_combo)
         
         self.refresh_btn = QPushButton("Refresh")
-        self.refresh_btn.clicked.connect(self.load_selected_map)
+        self.refresh_btn.clicked.connect(self._refresh_data)
         controls_layout.addWidget(self.refresh_btn)
         
         controls_layout.addStretch()
@@ -48,49 +46,96 @@ class MapWidget(QWidget):
         self.layout.addWidget(self.web_view)
         
         # Initialize
-        self.load_selected_map()
+        self._refresh_data()
         
-    def load_selected_map(self):
-        """Load the map corresponding to the selected mode."""
-        mode_data = self.mode_combo.currentData()
+    def _refresh_data(self):
+        """Scan available maps and refresh UI."""
+        self.mode_combo.blockSignals(True)
+        current_file = self.mode_combo.currentData()
+        self.mode_combo.clear()
         
         current_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.abspath(os.path.join(current_dir, "../../../"))
         viz_dir = os.path.join(project_root, "visualizations")
         
-        target_file = None
+        if not os.path.exists(viz_dir):
+            self.mode_combo.blockSignals(False)
+            return
+
+        # 1. Add Static Baselines
+        baseline_map = os.path.join(viz_dir, "baseline_map.html")
+        if os.path.exists(baseline_map):
+            self.mode_combo.addItem("Baseline Map", baseline_map)
+            
+        baseline_heatmap = os.path.join(viz_dir, "baseline_heatmap.html")
+        if os.path.exists(baseline_heatmap):
+            self.mode_combo.addItem("Baseline Heatmap", baseline_heatmap)
+            
+        # 2. Add Dynamic Maps
+        # Pattern: {algorithm}_k{k}_{type}.html
+        # e.g., greedy_k1_map.html, milp_k5_heatmap.html
+        import re
+        map_pattern = re.compile(r'(.+)_k(\d+)_(map|heatmap)\.html')
         
-        if mode_data == "baseline_map.html":
-            target_file = os.path.join(viz_dir, "baseline_map.html")
+        found_maps = []
+        
+        for f in os.listdir(viz_dir):
+            match = map_pattern.search(f)
+            if match:
+                algo = match.group(1).title()  # greedy -> Greedy
+                k = int(match.group(2))
+                type_ = match.group(3).title() # map -> Map
+                
+                display_name = f"{algo} {type_} (k={k})"
+                full_path = os.path.join(viz_dir, f)
+                found_maps.append((k, algo, type_, display_name, full_path))
+                
+        # Sort by K, then Algorithm, then Type
+        found_maps.sort(key=lambda x: (x[0], x[1], x[2]))
+        
+        for _, _, _, name, path in found_maps:
+            self.mode_combo.addItem(name, path)
             
-        elif mode_data == "optimized_map_dynamic":
-            # Find latest optimized map
-            target_file = self._find_latest_file(viz_dir, "_map.html", exclude="baseline")
+        # Restore selection
+        index = self.mode_combo.findData(current_file)
+        if index >= 0:
+            self.mode_combo.setCurrentIndex(index)
+        else:
+            self.mode_combo.setCurrentIndex(0)
             
-        elif mode_data == "comparison_map_dynamic":
-            # Find latest comparison map
-            target_file = self._find_latest_file(viz_dir, "_comparison.html")
-            
+        self.mode_combo.blockSignals(False)
+        self.load_selected_map()
+
+    def load_selected_map(self):
+        """Load the map corresponding to the selected mode."""
+        target_file = self.mode_combo.currentData()
+        
         if target_file and os.path.exists(target_file):
             print(f"Loading map: {target_file}")
             self.load_html_file(target_file)
         else:
-            print(f"Map file not found for mode: {mode_data}")
-            # Load default if nothing found
-            if mode_data == "baseline_map.html":
+            print(f"Map file not found: {target_file}")
+            # If baseline, try to regen? No, simply show empty logic for now or default
+            if target_file and "baseline" in target_file:
                  self.init_default_map()
 
-    def _find_latest_file(self, folder, suffix, exclude=None):
-        """Find the most recently modified file ending with suffix."""
+    def _find_latest_file(self, folder, suffix, include=None, exclude=None):
+        """Find the most recently modified file."""
         if not os.path.exists(folder):
             return None
             
         candidates = []
         for f in os.listdir(folder):
-            if f.endswith(suffix):
-                if exclude and exclude in f:
-                    continue
-                candidates.append(os.path.join(folder, f))
+            if not f.endswith(suffix):
+                continue
+                
+            if exclude and exclude in f:
+                continue
+                
+            if include and include not in f:
+                continue
+                
+            candidates.append(os.path.join(folder, f))
         
         if not candidates:
             return None

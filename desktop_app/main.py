@@ -20,7 +20,8 @@ def main():
     
     # Create and show main window
     window = MainWindow()
-    window.show()
+    window.resize(1280, 800)  # Set reasonable default size
+    window.showMaximized()  # Start maximized instead of normal size
     
     # Execute application
     sys.exit(app.exec())

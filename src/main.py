@@ -36,6 +36,10 @@ def main():
                        help='Generate visualization maps')
     parser.add_argument('--evaluate', action='store_true',
                        help='Evaluate results against success criteria')
+    parser.add_argument('--record-demo', action='store_true',
+                       help='Record optimization iterations for demo replay')
+    parser.add_argument('--demo-mode', type=str,
+                       help='Replay recorded optimization (e.g., greedy_k3)')
     
     args = parser.parse_args()
     
@@ -141,11 +145,48 @@ def main():
     # Step 6: Run optimization
     solutions = {}
     
-    if args.algorithm in ['greedy', 'both']:
+    # Demo Mode: Replay recorded optimization
+    if args.demo_mode:
+        print(f"=" * 80)
+        print(f"DEMO MODE: Replaying {args.demo_mode}")
+        print(f"=" * 80)
+        
+        from src.optimization.demo_player import DemoPlayer
+        player = DemoPlayer(db, graph, scorer)
+        
+        try:
+            def on_iteration(iteration_num, progress, objective, improvement, amenity_type, node_id):
+                """Callback for progress updates."""
+                if iteration_num % 5 == 0:
+                    print(f"  Iteration {iteration_num}: {progress:.1f}% | "
+                          f"Obj: {objective:.4f} | +{improvement:.6f}")
+                    # Emit progress for UI
+                    print(f"::PROGRESS::{progress:.1f}::Demo Replay::{iteration_num} iterations", flush=True)
+            
+            solution = player.replay(args.demo_mode, 
+                                    on_iteration_callback=on_iteration,
+                                    delay_per_iteration=0.5)
+            
+            # Quick validation
+            if len(solution) > 0:
+                validation = player.quick_validate(solution, sample_size=1000)
+                print(f"Validation (n={validation['sample_size']}): {validation['sample_objective']:.4f}")
+            
+            solutions['greedy'] = solution
+            print("✓ Demo replay completed\\n")
+            
+        except Exception as e:
+            print(f"ERROR in demo replay: {e}")
+            import traceback
+            traceback.print_exc()
+            return 1
+    
+    # Normal Optimization
+    elif args.algorithm in ['greedy', 'both']:
         print("Step 6a: Running Greedy optimization...")
         greedy_opt = GreedyOptimizer(graph, scorer)
         try:
-            greedy_solution = greedy_opt.optimize(k=args.k)
+            greedy_solution = greedy_opt.optimize(k=args.k, record_demo=args.record_demo)
             greedy_opt.save_results(greedy_solution, scenario=f'greedy_k{args.k}')
             solutions['greedy'] = greedy_solution
             print("✓ Greedy optimization completed\n")
